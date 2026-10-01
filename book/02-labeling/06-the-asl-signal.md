@@ -266,7 +266,7 @@ label. The M0 scan is brighter in the ventricles, as the ratio map predicted.
 
 The noise level can be read two ways: from the voxels outside the head, where the magnitude
 of pure complex noise has the Rayleigh mean $\sigma\sqrt{\pi/2}$
-([Chapter 8](../03-preprocessing/08-noise.md)), or from the standard deviation over time of
+({cite:p}`gudbjartsson1995`; [Chapter 8](../03-preprocessing/08-noise.md)), or from the standard deviation over time of
 a voxel whose true signal does not change, such as a white matter voxel across the thirty
 control volumes. The perfusion signal comes from the noise-free run of the same protocol.
 
@@ -307,8 +307,9 @@ either tier as the point requires, and score both against the same truth.
 ## What this implies for acquisition
 
 - **The signal is a half-percent difference.** Every choice is an SNR choice. Keep the echo
-  time short, the voxels large, and the pairs many; the white paper's 3.5 × 3.5 × 5 mm at
-  30 to 40 pairs is a compromise, not a limit.
+  time short, the voxels large, and the pairs many; the white paper's 3 to 4 mm in-plane
+  voxels and 4 to 8 mm slices, averaged for about four minutes {cite:p}`alsop2015`, are a
+  compromise, not a limit.
 - **Scan time buys SNR slowly.** Four times the pairs for twice the SNR. A 5-minute scan
   gives voxelwise SNR near 3 in gray matter; regional averages are what ASL reports reliably.
 - **Acquire an M0 scan.** The control image is saturated by the repetition time, most in

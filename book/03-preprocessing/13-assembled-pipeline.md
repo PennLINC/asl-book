@@ -153,7 +153,8 @@ voxel size already does ([Chapter 12](./12-partial-volume.md)). **The ghost** (t
 column) appears in the background window as two faint copies of the brain above and
 below it, where the orange outline marks half a field of view away: the signal there is
 5.2 % of the brain's mean against 1.0 % in the reference (the reference's 1 % is the
-Rician noise floor). Scanners calibrate it out with a reference scan and a residual of a
+Rician noise floor). Scanners calibrate it out with a reference scan, or estimate the
+phase correction from the image itself {cite:p}`buonocore1997`, and a residual of a
 percent is normal; a larger ghost is a hardware or calibration fault that can only be
 detected, by measuring the background as here, and the run excluded or repeated. **The
 spikes** (fourth column) are the loudest: each spike is one bright k-space sample, a plane
@@ -197,8 +198,8 @@ volumes are few enough to drop.
 
 The `kitchen-sink` dataset is the reference protocol with everything on: the phantom with
 its field map, a TE of 20 ms and a total readout time of 35 ms (distortion of up to four
-voxels, [Chapter 11](./11-susceptibility-distortion.md)), eight coils with GRAPPA 2,
-partial Fourier 6/8, a 2 % ghost, two background-suppression pulses at 2.25 and 3.50 s
+voxels, [Chapter 11](./11-susceptibility-distortion.md)), eight coils with GRAPPA 2
+{cite:p}`griswold2002`, partial Fourier 6/8, a 2 % ghost, two background-suppression pulses at 2.25 and 3.50 s
 ([Chapter 9](./09-background-suppression.md)), random head motion on six volumes
 ([Chapter 10](./10-motion.md)), and noise. It comes as two runs, `ap` and `pa`, with
 opposite phase-encode polarity and the same motion, each with its own unsuppressed M0
@@ -367,8 +368,8 @@ The estimates land on the recorded poses for the six moved volumes: the translat
 agree within 0.1 mm in-plane and 0.3 mm through-plane, the rotations within a tenth of a
 degree. The through-plane translation is the least certain, as it must be with 5 mm
 slices and a 100 mm slab, and the still volumes are estimated as still to within 0.06 mm
-and 0.04°. The framewise displacement trace, the motion summary a pipeline reports, is
-above 0.5 mm only at the moved volumes and the ones after them (a jump back is a
+and 0.04°. The framewise displacement trace {cite:p}`power2012`, the motion summary a
+pipeline reports, is above 0.5 mm only at the moved volumes and the ones after them (a jump back is a
 displacement too). Volume 41, which moved by 1.8 mm and 1°, differs from the mean
 control by 92 image units in the interior before registration, the edge pattern of
 [Chapter 10](./10-motion.md), and by 50 after, against 34 for a still volume; the
@@ -381,9 +382,14 @@ level the map is limited by noise, not by motion.
 
 Registration undoes the displacement but not everything: the moved volumes were
 interpolated, which smooths them, and any within-volume or through-plane effect remains.
-A SCORE-like rule {cite:p}`dolui2017` looks at each pair's mean difference in gray matter
-and discards the pairs that deviate from the median by more than three robust standard
-deviations (1.4826 times the median absolute deviation).
+The rule used here is the first pass of the SCORE algorithm {cite:p}`dolui2017` with a
+wider threshold: it takes each pair's mean difference in gray matter and discards the
+pairs that deviate from the median by more than three robust standard deviations (1.4826
+times the median absolute deviation), where SCORE takes the mean gray matter CBF and a
+threshold of 2.5. SCORE's second pass, which goes on removing the volume most correlated
+with the mean CBF map for as long as the within-tissue variance of that map falls, and
+SCRUB {cite:p}`dolui2016`, which then down-weights outlying values voxel by voxel instead
+of discarding volumes, are run on the `motion` dataset in [Chapter 10](./10-motion.md).
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -435,8 +441,9 @@ The field map moves signal along the phase-encode axis by field × total readout
 opposite directions in the `ap` and `pa` runs ([Chapter 11](./11-susceptibility-distortion.md)).
 The pipeline here has the luxury of the true field: the phantom's field map, box-averaged
 to the acquisition grid exactly as the simulator averages everything else. In a study it
-would come from a field-map scan or be estimated from the blip-up/blip-down pair, which
-is what topup and its ASL wrappers do. The sign of the displacement is not a convention
+would come from a field-map scan {cite:p}`jezzard1995` or be estimated from the
+blip-up/blip-down pair, which is what FSL's `topup` {cite:p}`andersson2003,smith2004` and
+the pipelines that wrap it do. The sign of the displacement is not a convention
 to remember but a thing to check, so the cell fixes it against the `sdc` dataset's
 undistorted run, then unwarps each run's mean difference image and M0 scan column by
 column with a Jacobian and averages the two runs.
@@ -499,7 +506,7 @@ the difference is divided by the label factor from the sidecar's simulation bloc
 study, computed from the pulses' efficiency, or measured). The M0 scan is then corrected
 for its own saturation at TR 8 s and for the difference between the tissue's T2 and the
 blood's at the 20 ms echo time ([Chapter 16](../04-quantification/16-calibration.md)),
-and the white-paper formula with each slice's delay does the rest. Last, because it needs
+and the white-paper formula {cite:p}`alsop2015` with each slice's delay does the rest. Last, because it needs
 a map from which every other error has been removed and fractions on the same,
 undistorted grid, comes the linear regression of {cite:t}`asllani2008` with a 5 × 5 kernel
 ([Chapter 12](./12-partial-volume.md)).
@@ -570,11 +577,15 @@ show first. The temporal SNR of the difference series is 0.41 in gray matter and
 white matter: a single pair's difference is well below its own noise, which is normal for
 ASL and the reason for 30 pairs. The negative-voxel fraction, 11.5 % of the slab, says how
 much of the map is below the noise floor and is dominated by white matter and CSF. The
-GM/WM ratio of 5.1 is checked against the expected 2 to 4; it is high here for the reason
+GM/WM ratio of 5.1 is to be compared with the phantom's pure-tissue ratio of 3 (60
+against 20 ml/100 g/min); it is high here for the reason
 [Chapter 12](./12-partial-volume.md) gave, the white-matter kinetics. The motion summary,
 a mean framewise displacement of 0.91 mm with a maximum of 6.6 mm, six moved volumes and
 three rejected pairs, decides whether the subject is kept and enters the group analysis
-as a covariate.
+as a covariate. ASLPrep condenses evidence of the same kind into one number per CBF map,
+the quality evaluation index (QEI), built from the structural similarity between the CBF
+map and the tissue maps, the spatial variability of the map, and the fraction of gray
+matter voxels with negative CBF {cite:p}`dolui2017qei,adebimpe2022`.
 
 ## Measure it: the error after each step
 
@@ -609,13 +620,13 @@ the pure-tissue value: 60.4 against a truth of 60.
 
 | Step | ASLPrep {cite:p}`adebimpe2022` | ExploreASL {cite:p}`mutsaerts2020` | BASIL / oxford_asl {cite:p}`chappell2009` | White paper {cite:p}`alsop2015` |
 |---|---|---|---|---|
-| Motion correction | whole series, before subtraction (MCFLIRT) | control and label separately, then together | MCFLIRT before the fit | recommended before subtraction |
-| Outlier rejection | SCORE and SCRUB on the CBF time series | spike and motion exclusion by a t-statistic | none by default | "consider" excluding corrupted pairs |
-| Distortion correction | field map or blip-up/blip-down, applied to series and M0 | topup or field map, applied to series and M0 | `--fmap` options, applied to both | if available, M0 too |
+| Motion correction | whole series, before subtraction (MCFLIRT {cite:p}`jenkinson2002`) | SPM realignment {cite:p}`friston1995` with a regressor for the control-label intensity difference | MCFLIRT before the fit | image registration may be applied; prospective correction where available |
+| Outlier rejection | optional: SCORE {cite:p}`dolui2017`, then SCRUB {cite:p}`dolui2016`, on the CBF time series | ENABLE {cite:p}`shirzadi2018`: pairs sorted by their motion and excluded while that improves the temporal SNR | none by default | inspect the individual difference images and exclude the artifactual ones |
+| Distortion correction | field map or blip-up/blip-down, through SDCFlows {cite:p}`esteban2019` | `topup` on a reversed-polarity pair, when one was acquired | `--fmap` options, applied to both | not addressed |
 | Subtraction, suppression factor | pairwise; efficiency times a suppression term | pairwise; efficiency corrected for suppression | inside the kinetic-model fit | efficiency reduced per pulse |
-| Calibration | M0 scan (or control mean), smoothed, T1 and T2 terms | M0 scan, smoothed, T1 term | voxel-wise or CSF reference, TR and T2 terms | separate M0, TR ≥ 5 s or T1 correction |
-| Partial-volume correction | optional, last, regression on the CBF map | optional, last, regression | optional, inside the fit (spatial prior) | not addressed |
-| QC | tSNR, negative voxels, GM/WM ratio, FD, QEI | tSNR, spatial CoV, motion, vascular signal | none | not addressed |
+| Calibration | M0 scan, an M0 value in the metadata, or the control mean; optional scaling and smoothing | M0 scan, masked and smoothed, T1 correction for a short TR | voxel-wise or CSF reference, TR and T2 terms | separate M0, TR ≥ 5 s or T1 correction |
+| Partial-volume correction | optional, through BASIL | optional, last, regression {cite:p}`asllani2008` | optional, inside the fit, with a spatial prior {cite:p}`chappell2011,groves2009` | not addressed |
+| QC | FD, coregistration and normalization overlap, QEI {cite:p}`dolui2017qei` | temporal SNR, spatial CoV, motion | none | visual: gray-white contrast, plausible gray matter CBF, the individual difference images |
 
 The order is the same in all of them, for reasons the steps above made visible.
 **Registration comes before subtraction** because a difference image made from
@@ -640,7 +651,8 @@ uncorrected artifact in the map is fitted as perfusion.
   the series; a structural image for the fractions. A pipeline corrects only what the
   acquisition recorded.
 - **Record the label efficiency and the suppression pulses in the sidecar.** The largest
-  correction in the table is a number that has to come from the protocol.
+  correction in the table is a number that has to come from the protocol, and ASL-BIDS has
+  fields for both {cite:p}`clement2022`.
 - **Look at the background.** Ghosts and spikes are found by windowing the images to the
   noise floor, not by any subtraction; a control image's background is the cheapest QC
   there is.
@@ -651,7 +663,12 @@ uncorrected artifact in the map is fitted as perfusion.
 
 The pipelines: ASLPrep {cite:p}`adebimpe2022`, ExploreASL {cite:p}`mutsaerts2020`, BASIL
 {cite:p}`chappell2009`; the consensus paper {cite:p}`alsop2015`. Outlier rejection by
-SCORE {cite:p}`dolui2017`; framewise displacement {cite:p}`power2012`; the reverse-polarity
-distortion estimate {cite:p}`andersson2003`; the partial-volume regression
-{cite:p}`asllani2008`; the GRAPPA reconstruction whose noise structure the kitchen sink
-inherits {cite:p}`griswold2002`.
+SCORE {cite:p}`dolui2017` and the voxel-wise robust estimate that follows it, SCRUB
+{cite:p}`dolui2016`, or by motion-sorted exclusion, ENABLE {cite:p}`shirzadi2018`; the
+quality evaluation index {cite:p}`dolui2017qei`; framewise
+displacement {cite:p}`power2012`; ghost correction from the image phase
+{cite:p}`buonocore1997`; the reverse-polarity distortion estimate {cite:p}`andersson2003`
+and the SDCFlows workflows that grew out of fMRIPrep {cite:p}`esteban2019`; the
+partial-volume regression {cite:p}`asllani2008` and the spatial-prior alternative
+{cite:p}`chappell2011,groves2009`; the GRAPPA reconstruction whose noise structure the
+kitchen sink inherits {cite:p}`griswold2002`.

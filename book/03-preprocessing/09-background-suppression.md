@@ -92,7 +92,7 @@ changes by tens of percent; pulsation, breathing, and drifts of the field or the
 it by a fraction of a percent. **A change of 1 % of 6200 is 62 units, twice the perfusion
 signal**; the same change of a static signal of 600 would be 6 units. Every fluctuation
 that scales with the static signal is reduced in proportion by reducing that signal at the
-moment of the readout, provided the label keeps its size.
+moment of the readout, provided the label keeps its size {cite:p}`ye2000`.
 
 That is **background suppression**: one or more inversion pulses applied to the imaging
 region during the post-labeling delay, timed so that the longitudinal magnetization of the
@@ -169,13 +169,24 @@ sign of the difference: control − label becomes negative.** The loss is inflic
 not the tissue is nulled, so a quantification step must divide the difference by the
 factor, and the sidecar records what to divide by (`BackgroundSuppressionNumberPulses`, and
 in these simulations `AslscanSimulation.BackgroundSuppressionLabelFactor`). The white
-paper's advice to use pulses of high efficiency, and no more of them than needed, comes
-from this factor {cite:p}`alsop2015`; measuring ε for real pulses is the subject of
-{cite:t}`garcia2005`.
+paper's guidance follows the same trade: every pulse costs some of the label, more pulses
+null a wider range of T1 values, and it names two pulses as a good compromise
+{cite:p}`alsop2015`; measuring the efficiency of real pulses and its effect on the label
+is the subject of {cite:t}`garcia2005`.
+
+The definition of ε matters when numbers from different sources are compared. In this
+book and in aslscan, ε is the fraction of the longitudinal magnetization that is inverted,
+$M_z^+ = (1 - 2\varepsilon)\, M_z^-$, so ε = 0.95 multiplies the control − label
+difference by $|1 - 2\varepsilon| = 0.90$ per pulse, and by 0.81 for two. The white
+paper's statement that each pulse costs about 5 % of the ASL signal {cite:p}`alsop2015`
+corresponds to ε ≈ 0.975 in this definition, so the simulated pulses lose twice as much
+label per pulse as the ones it describes.
 
 ## See it: choosing the pulse times
 
-For a target time the two pulse times are a two-dimensional search. The left panel is the
+For a target time the two pulse times are a two-dimensional search; the numerical
+optimization of the pulse timing for ASL, over a range of T1 values, is the subject of
+{cite:t}`maleki2012`. The left panel is the
 root mean square of $M_z/M_0$ over gray and white matter at the middle of the readout,
 3.98 s, for every pair of pulse times before the first excitation at 3.60 s, on a
 logarithmic color scale (`kinetic.optimal_suppression_times` performs the same search, but
@@ -268,7 +279,7 @@ worst.
 ## The setting that produces it
 
 In BIDS the pulses are `BackgroundSuppression: true`, `BackgroundSuppressionNumberPulses` and
-`BackgroundSuppressionPulseTime` (seconds from the start of labeling); the pipeline's
+`BackgroundSuppressionPulseTime` (seconds from the start of labeling) {cite:p}`clement2022`; the pipeline's
 `bgsup` dataset passes `background_suppression: [2.25, 3.50]` to the protocol and the
 simulator records what it resolved in `AslscanSimulation.BackgroundSuppression`.
 
@@ -394,10 +405,12 @@ the factor (last panel) returns the perfusion image of the unsuppressed run, wit
 speckle, because thermal noise is untouched by the pulses.
 
 Real scanners deliver magnitude images by default, and the phase is not always saved. The
-usual protection is to time the pulses so that every slice is read with a small *positive*
-residual, of the order of 5–10 % of $M_0$, rather than at the exact null; with a 3D readout
-one null time serves every voxel and the margin can be small. If the phase was saved, the
-signed image can be formed as above. Either way, a pipeline that receives a suppressed 2D
+white paper's answer is to subtract the complex images, because the difference of two
+magnitude images that are near zero is ambiguous in sign {cite:p}`alsop2015`; the signed
+image formed above is that subtraction. Where only magnitudes are available, the pulses
+can instead be timed so that every slice is read with a small *positive* residual rather
+than at the exact null, at the price of less suppression; with a 3D readout one null time
+serves every voxel and the margin can be small. Either way, a pipeline that receives a suppressed 2D
 series must know how the pulses were timed relative to every slice, which is why the
 sidecar carries `BackgroundSuppressionPulseTime` and `SliceTiming` together.
 
@@ -431,13 +444,15 @@ for name in runs:
   to 12.9 units RMSE, the same 1/0.81. Recovering the SNR would take 1/0.81² = 1.5 times the
   pairs. In a simulator with only thermal noise, suppression is a pure loss.
 - **The simulator's global-bolus approximation.** aslscan inverts the whole labeled bolus at
-  every pulse, wherever the bolus is, which is what $(1-2\varepsilon)^N$ assumes. Real pulses
-  cover the imaging slab, so label still in transit below the slab at 2.25 s is not inverted
-  then and arrives with fewer inversions; the retained label of a real acquisition is lower
-  than the factor predicts, and the factor is an upper bound. The sidecar says so in
-  `AslscanSimulation.BackgroundSuppressionModel: "global-bolus"`. Quantifying real suppressed
-  data with $(1-2\varepsilon)^N$ overestimates the retained label and underestimates CBF, by
-  an amount that depends on where the bolus was at each pulse.
+  every pulse, wherever the bolus is, which is what $(1-2\varepsilon)^N$ assumes, and the
+  sidecar says so in `AslscanSimulation.BackgroundSuppressionModel: "global-bolus"`. That is
+  what a non-selective pulse does, and it is the case the white paper describes, in which
+  the blood to be labeled experiences every inversion pulse {cite:p}`alsop2015`.
+  Implementations differ. A slab-selective pulse leaves label that is still in transit
+  below the slab uninverted, so that label arrives with fewer inversions, and with the
+  opposite sign if it missed an odd number of them; $(1-2\varepsilon)^N$ then no longer
+  describes the retained label, and the factor to divide by depends on where the bolus was
+  at each pulse.
 
 ## See it: motion with and without suppression
 
@@ -530,5 +545,6 @@ For the still series the ranking is set by the label factor alone: 10.5 units fo
 
 Multiple inversion recovery to null static tissue {cite:p}`dixon1991`; background
 suppression for ASL {cite:p}`ye2000`; the efficiency of inversion pulses and its effect on
-the label {cite:p}`garcia2005`; the white paper's recommendations on suppression and 3D
+the label {cite:p}`garcia2005`; the optimization of the pulse timing {cite:p}`maleki2012`;
+the sidecar fields that record the pulses {cite:p}`clement2022`; the white paper's recommendations on suppression and 3D
 readouts {cite:p}`alsop2015`; 2D versus 3D readouts with suppression {cite:p}`vidorreta2013`.

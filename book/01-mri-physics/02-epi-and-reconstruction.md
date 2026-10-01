@@ -57,17 +57,20 @@ def show_kspace(ax, k, title=None, **kw):
 Without a gradient every spin in a slice precesses at the same frequency and the receiver
 cannot tell where the signal came from. A gradient coil adds a small field that grows
 linearly with position along one direction, so the precession frequency depends on position
+(the idea from which MR imaging started, {cite:t}`lauterbur1973`)
 and, after the gradient has been on for a while, each spin's phase is proportional to its
 position: the phase winds across the object like a corkscrew, tighter the longer the gradient
 stays on. The receiver still records only the sum over the whole object, as one complex
 number. Adding up arrows that point in different directions is the same as multiplying the
 object by a striped pattern with the corkscrew's pitch and summing, so one recorded number
 says how much of the object varies on that spatial scale. That number is one sample of
-**k-space**, and $\mathbf{k}$ is the number of turns per millimeter, in cycles/mm:
+**k-space** {cite:p}`ljunggren1983,twieg1983`, and $\mathbf{k}$ is the number of turns per
+millimeter, in cycles/mm:
 
 $$s(\mathbf{k}) = \int \rho(\mathbf{r})\, e^{-2\pi i\, \mathbf{k}\cdot\mathbf{r}}\, d\mathbf{r},$$
 
-the Fourier transform of the image $\rho(\mathbf{r})$. A pulse sequence is a plan for moving
+the Fourier transform of the image $\rho(\mathbf{r})$ ({cite:t}`haacke1999` and
+{cite:t}`nishimura2010` give the derivation). A pulse sequence is a plan for moving
 through k-space (the gradient history sets $\mathbf{k}$) and recording samples along the
 way; reconstruction is the inverse Fourier transform. Along the **readout** direction a
 gradient stays on while the receiver samples, and a whole line of k-space is collected in
@@ -144,8 +147,8 @@ fig.tight_layout()
 Keeping only the central half of the samples in each direction (middle column) gives 7 mm
 voxels: the same brain, blurred. Keeping every other phase-encode line (right column) halves
 the field of view along that axis, and the parts of the head that no longer fit wrap around
-to the other side. Parallel imaging deliberately does the second and undoes the wrap with
-the receive coils (below).
+to the other side. Parallel imaging {cite:p}`pruessmann1999,griswold2002` deliberately does
+the second and undoes the wrap with the receive coils (below).
 
 ## Truncation and Gibbs ringing
 
@@ -246,7 +249,7 @@ print(f"TLineMs {t_line:.4f} ms x {n_lines} lines = {t_line * n_lines:.1f} ms = 
 ```
 
 Left: the zigzag. Every line runs the opposite way to the one before, which is why a timing
-mismatch between odd and even lines produces the Nyquist ghost of
+mismatch between odd and even lines produces the Nyquist ghost {cite:p}`buonocore1997` of
 [Chapter 13](../03-preprocessing/13-assembled-pipeline.md). Right: the reference readout
 as the simulator times it, sampling from 2 to 22 ms with the center of k-space, which
 decides the contrast, at TE. The simulator applies the spin-echo T2 envelope at TE and the
@@ -255,14 +258,17 @@ at 6 ms, inside the train, so a real spin-echo EPI at this matrix would use a lo
 partial Fourier (below). The train is short by the standards of diffusion or functional EPI
 (30–90 ms) because the ASL matrix is small, and that shortness limits its distortion.
 
-The **total readout time** sets how far an off-resonance moves the image. A spin precessing
+The **total readout time** sets how far an off-resonance moves the image
+{cite:p}`jezzard1995`. A spin precessing
 $\Delta f$ hertz away from the scanner's assumed frequency accumulates extra phase that
 grows through the train, line by line, exactly as a phase-encode gradient would, so the
 reconstruction places its signal at the wrong position along the phase-encode axis:
 
 $$\Delta y = \Delta f \times \mathrm{TotalReadoutTime} \quad \text{(in voxels)}.$$
 
-At 100 Hz, a typical offset above the frontal sinuses, that is 100 × 0.020 = 2 voxels, or
+At 100 Hz, close to the largest offset of the phantom's synthetic field map, which sits
+above the frontal sinuses
+([Chapter 11](../03-preprocessing/11-susceptibility-distortion.md)), that is 100 × 0.020 = 2 voxels, or
 7 mm, along `PhaseEncodingDirection`, which the sidecar records as `j-`: the second image
 axis, posterior–anterior, in the negative sense. A real offset varies across the head, so
 rows move by different amounts and tissue piles up on one side and stretches on the other;
@@ -294,7 +300,8 @@ would move it proportionally farther.
 ## Three refinements of the readout
 
 **Partial Fourier.** For an object with no phase, k-space is symmetric about its center, so
-half of the lines are redundant. A partial-Fourier acquisition skips a fraction of the lines
+half of the lines are redundant. A partial-Fourier acquisition
+{cite:p}`feinberg1986,noll1991` skips a fraction of the lines
 on one side (typically 5/8 to 7/8 are acquired) and lets the reconstruction supply the rest
 from the symmetry: the train is shorter and the center of k-space is reached sooner, which
 allows a shorter TE. But real images do have phase, from field inhomogeneity, coil phase,
@@ -317,8 +324,10 @@ which halves (for $R = 2$) the train, the total readout time, and therefore the 
 Because each coil sees the object through a smooth sensitivity, a skipped k-space sample can
 be predicted from its neighbors across all coils; GRAPPA {cite:p}`griswold2002` learns those
 weights from a fully sampled band of central lines (`AcsLines: 24` in the sidecar). The
-reconstruction removes the wrap of the aliasing figure but amplifies the noise, unevenly
-across the image, and the magnitude noise is no longer Rician
+reconstruction removes the wrap of the aliasing figure but amplifies the noise by a factor
+that varies across the image (the g-factor, defined for SENSE by {cite:t}`pruessmann1999`
+and computed for GRAPPA by {cite:t}`breuer2009`)
+and correlates it between neighboring voxels, so one σ no longer describes the image
 ([Chapter 8](../03-preprocessing/08-noise.md)).
 
 ## Magnitude, phase, and noise
@@ -328,7 +337,8 @@ phase. The **magnitude** is the amount of transverse magnetization the voxel hel
 echo, the image everyone looks at. The **phase** is the angle it had turned through relative
 to the scanner's reference, which includes an arbitrary constant from the receiver, so only
 phase differences carry information: between voxels (a field map), between echoes, or
-between acquisitions. BIDS stores both, as `part-mag` and `part-phase` files.
+between acquisitions. BIDS {cite:p}`gorgolewski2016` stores both, as `part-mag` and
+`part-phase` files.
 
 Thermal noise enters in k-space, as independent Gaussian noise of the same variance in
 every sample's real and imaginary parts. The Fourier transform is linear and orthogonal, so
@@ -337,8 +347,8 @@ per component in every voxel. Taking the magnitude changes the distribution: a v
 true signal $A$ has a **Rician** magnitude {cite:p}`gudbjartsson1995`. Where $A \gg \sigma$
 it is close to $A$ plus Gaussian noise of standard deviation $\sigma$; where $A = 0$ it is
 Rayleigh distributed, with mean $\sigma\sqrt{\pi/2} \approx 1.25\,\sigma$ and standard
-deviation $0.66\,\sigma$, so a magnitude image has no zero-mean background and never shows
-a negative value. The figure draws the reference noise level, $\sigma = 40$ image units
+deviation $0.66\,\sigma$ {cite:p}`henkelman1985`, so a magnitude image has no zero-mean
+background and never shows a negative value. The figure draws the reference noise level, $\sigma = 40$ image units
 (`NoiseVariance: 1600` per component in the sidecar), on four true signals.
 
 ```{code-cell} python
@@ -373,7 +383,8 @@ Everything above used a synthetic slice and the page's own Fourier transform. Th
 tier acquires the whole slab with aslscan: the same object, oversampled, sampled by a
 spin-echo EPI train, with noise added in k-space. The figure shows the first control volume
 of the reference series at the display slice, its phase, and the separate M0 scan, as loaded
-from the BIDS files; the printout lists the sidecar fields that describe the readout.
+from the BIDS files {cite:p}`clement2022`; the printout lists the sidecar fields that
+describe the readout.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -412,7 +423,7 @@ matter sits at 6246 image units, 156 σ.
 
 A magnitude image's background is a Rayleigh sample of the noise, so σ can be estimated from
 it without any knowledge of the object: divide the mean background magnitude by
-$\sqrt{\pi/2}$. The cell does that in the voxels whose tissue fractions are all zero, in two
+$\sqrt{\pi/2}$ {cite:p}`henkelman1985`. The cell does that in the voxels whose tissue fractions are all zero, in two
 versions: every such voxel, and only those at least three voxels from any tissue.
 
 ```{code-cell} python
@@ -450,8 +461,8 @@ with the orange line marking where the tissue fractions reach zero; about half t
 figure's 38, because the simulator's object is on a 1.75 mm grid whose edges one box average
 has already softened). A Rician voxel with a small true signal has a larger mean than a
 Rayleigh one, so the sidelobes bias the estimate upward, most near the brain and least in
-the corners. Accounting for them with the Rician identity $E|S|^2 = A^2 + 2\sigma^2$ gives
-40.0, and the standard deviation across the 30 control volumes in pure white-matter voxels,
+the corners. Accounting for them with the Rician identity $E|S|^2 = A^2 + 2\sigma^2$
+{cite:p}`gudbjartsson1995` gives 40.0, and the standard deviation across the 30 control volumes in pure white-matter voxels,
 where the noise is Gaussian, gives 39.8. The histogram shows the mismatch directly: the
 background sits to the right of the Rayleigh curve for σ = 40 and has a longer tail. A
 background-based estimate is therefore a slight overestimate whenever the object rings into
@@ -479,7 +490,11 @@ the background, which is always; a temporal estimate from the series itself
 
 ## Further reading
 
-The k-space description of MRI and echo-planar imaging {cite:p}`mansfield1977`; the Rician
-distribution of magnitude images {cite:p}`gudbjartsson1995`; coil arrays {cite:p}`roemer1990`
-and GRAPPA {cite:p}`griswold2002`; EPI distortion from field offsets {cite:p}`jezzard1995`;
-the textbooks {cite:t}`haacke1999` and {cite:t}`nishimura2010`.
+Imaging with gradients {cite:p}`lauterbur1973`, its k-space description
+{cite:p}`ljunggren1983,twieg1983` and echo-planar imaging {cite:p}`mansfield1977`; the
+noise of magnitude images {cite:p}`henkelman1985,gudbjartsson1995`; coil arrays
+{cite:p}`roemer1990`, SENSE {cite:p}`pruessmann1999`, GRAPPA {cite:p}`griswold2002` and
+its g-factor {cite:p}`breuer2009`; partial Fourier acquisition and reconstruction
+{cite:p}`feinberg1986,noll1991`; EPI distortion from field offsets {cite:p}`jezzard1995`;
+the BIDS standard {cite:p}`gorgolewski2016`; the textbooks {cite:t}`haacke1999` and
+{cite:t}`nishimura2010`.

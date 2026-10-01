@@ -95,7 +95,7 @@ acquisition choices that reduce it.
 The figures come from two sources, and every chapter says which.
 [Chapter 0.2](./the-simulated-datasets.md) describes each in full.
 
-- **Toy tier.** The kinetic model and the longitudinal signal equations, evaluated in the
+- **Toy tier.** The kinetic model {cite:p}`buxton1998` and the longitudinal signal equations, evaluated in the
   page on the packaged slab of the simulated brain, together with small simulations of
   spins, k-space, and noise. These run in seconds when the book is built. The toy tier is
   the simulator's signal stage without its scanner: it reproduces the simulator's own
@@ -135,10 +135,10 @@ to build against a local pipeline output instead, set `ASLBOOK_DATA` to its dire
 ## Reproducing the simulations
 
 [Appendix A](../appendices/a-aslscan-cookbook.md) shows, for every dataset, the BIDS sidecar
-and `aslcontext.tsv` the simulator read, the overlay of settings that BIDS does not record,
+and `aslcontext.tsv` {cite:p}`clement2022` the simulator read, the overlay of settings that BIDS does not record,
 and the command line, all rendered from the pipeline's own configuration. Each dataset
 directory carries a `provenance.json` with the same information plus the simulator version
-and commit. The pipeline itself is a Snakemake workflow in the repository's `pipelines`
+and commit. The pipeline itself is a Snakemake workflow {cite:p}`molder2021` in the repository's `pipelines`
 directory; it requires the aslscan binary and the phantom, which are distributed separately
 from the book.
 
@@ -162,5 +162,6 @@ it then.
 - The reference protocol is the book's 2D pseudo-continuous ASL acquisition: labeling
   duration 1.8 s, post-labeling delay 1.8 s, TR 4.5 s, TE 12 ms, 3.5 × 3.5 × 5 mm voxels, 20
   slices 40 ms apart, 30 control-label pairs, a separate M0 scan at TR 8 s. It follows the
-  ASL white paper's recommendations for 2D acquisitions within what the simulator models,
+  ASL white paper's recommendations {cite:p}`alsop2015` for 2D acquisitions within what the
+  simulator models,
   and every other dataset changes one thing at a time from it.

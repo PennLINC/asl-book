@@ -111,8 +111,10 @@ def m0_correction(m0scan: np.ndarray, *, tr: float, t1: float = presets.TISSUES[
                   t2_blood: float = presets.T2_BLOOD) -> np.ndarray:
     """Turn a measured M0 image into the tissue M0 the formula wants: undo the T1 saturation of
     the M0 scan's repetition time and replace the tissue's T2 decay at TE by the blood's.
-    ``t1`` may be a map (e.g. a run's ``T1map`` truth) so that CSF, whose T1 is 3 s, is not
-    corrected with the gray matter value."""
+    ``t1`` and ``t2_tissue`` may be maps (e.g. a run's ``T1map`` and ``T2map`` truths, with
+    zeros outside the brain replaced first). Pass both or neither: a T1 map alone removes the
+    saturation error in CSF but leaves the gray-matter T2 swap, which then shows (about +11 %
+    in pure CSF at TR 4.5 s), where the two errors had partly cancelled."""
     return m0scan / (1.0 - np.exp(-tr / t1)) * np.exp(-te / t2_blood) / np.exp(-te / t2_tissue)
 
 
@@ -202,7 +204,11 @@ def pv_correct(cbf: np.ndarray, gm: np.ndarray, wm: np.ndarray, kernel: int = 5,
     """Linear-regression partial-volume correction (Asllani et al. 2008): within a
     ``kernel x kernel`` in-plane neighborhood, solve ``cbf_i = gm_i f_GM + wm_i f_WM`` for the
     pure-tissue perfusions by least squares. Returns ``(cbf_gm, cbf_wm)`` maps, zero where the
-    neighborhood holds too little of a tissue (its summed fraction below ``min_frac``)."""
+    neighborhood holds too little of a tissue (its summed fraction below ``min_frac``); a
+    neighborhood of one tissue only gets the one-tissue solution. The input may equally be a
+    difference (deltam) map, which is what the published method regresses: on a CBF map the
+    per-voxel division by M0 at the edge of the head biases the gray-matter value upward by
+    a few percent (Chapter 12), which regressing deltam and M0 separately avoids."""
     from numpy.lib.stride_tricks import sliding_window_view
 
     r = kernel // 2

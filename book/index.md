@@ -8,9 +8,9 @@ kernelspec:
 
 Every figure in this book is produced by code you can run, and every perfusion estimate is
 scored against a known answer. The answer exists because the brain in these pages is
-simulated: a digital phantom with one perfusion rate, transit time, T1, T2, and equilibrium
+simulated: a digital phantom {cite:p}`olivertaylor2021` with one perfusion rate, transit time, T1, T2, and equilibrium
 magnetization per tissue passes through **aslscan**, a headless arterial spin labeling (ASL)
-simulator that evaluates the kinetic model in every voxel, forms the label and control
+simulator that evaluates the kinetic model {cite:p}`buxton1998` in every voxel, forms the label and control
 images, and acquires them with a model of a 2D spin-echo echo-planar scanner, k-space and
 all. The same phantom yields the ground-truth maps that no scanner can provide.
 

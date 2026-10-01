@@ -39,7 +39,7 @@ says where the term is explained properly.
 | $M_0$ | equilibrium longitudinal magnetization of tissue (the phantom's `M0map`) | arbitrary | 1, 6 |
 | $M_z$, $M_{xy}$ | longitudinal and transverse magnetization | arbitrary | 1 |
 | $T_1$, $T_2$, $T_2^*$ | relaxation times of tissue (GM 1.33 s; 80 ms; 66 ms) | s | 1 |
-| $T_{1b}$, $T_{2b}$ | relaxation times of arterial blood (1.65 s; 165 ms at 3 T) | s | 3, 5 |
+| $T_{1b}$, $T_{2b}$ | relaxation times of arterial blood at 3 T (1.65 s {cite:p}`lu2004`; 165 ms in the simulator, a value that varies with oxygenation and hematocrit {cite:p}`zhao2007`) | s | 3, 5 |
 | $T_1'$ | apparent tissue T1 with the label's outflow, $1/T_1' = 1/T_1 + f/\lambda$ | s | 5 |
 | TR, TE | repetition time, echo time | s | 1, 2 |
 | $\Delta f$ | off-resonance (field offset) | Hz | 2, 11 |
@@ -48,12 +48,14 @@ says where the term is explained properly.
 
 ## Perfusion and the kinetic model
 
+The kinetic model is the general kinetic model of {cite:t}`buxton1998`.
+
 | Symbol | Meaning | Unit | Chapter |
 |---|---|---|---|
 | $f$, CBF | cerebral blood flow (perfusion); GM 60, WM 20 in the phantom | ml/100 g/min | 3 |
-| $\lambda$ | blood-brain partition coefficient of water; 0.9 | ml/g | 3 |
+| $\lambda$ | blood-brain partition coefficient of water; 0.9 {cite:p}`herscovitch1985` | ml/g | 3 |
 | $M_{0b}$ | equilibrium magnetization of arterial blood, $M_0 / \lambda$ | arbitrary | 3, 16 |
-| $\alpha$ | labeling efficiency (PCASL 0.85, CASL 0.68 here, PASL 0.98) | – | 4 |
+| $\alpha$ | labeling efficiency (PCASL 0.85 and PASL 0.98 {cite:p}`alsop2015`; CASL 0.68 here {cite:p}`wang2005,wu2007`) | – | 4 |
 | $\tau$ | bolus duration: the labeling duration for (P)CASL, the cut-off delay for PASL | s | 4, 5 |
 | $\delta$, ATT | arterial transit time (GM 0.8 s, WM 1.2 s in the phantom) | s | 3, 5 |
 | $w$, PLD | post-labeling delay | s | 5 |
@@ -64,6 +66,8 @@ says where the term is explained properly.
 | SNR, tSNR | signal-to-noise ratio; temporal SNR of the difference series | – | 8 |
 
 ## Data and files
+
+File and field names follow BIDS {cite:p}`gorgolewski2016` and its ASL extension {cite:p}`clement2022`.
 
 | Term | Meaning |
 |---|---|
@@ -83,7 +87,7 @@ says where the term is explained properly.
   times the saturation and T2 factors of the readout, so a gray matter control voxel is
   about 6200, a gray matter M0 scan voxel about 6450, and a gray matter difference about 30.
   The ground-truth `deltam` map is in the units of `M0map` (about 0.3 in pure gray matter).
-- Unless stated otherwise, the constants are the phantom's and the white paper's: $\lambda$
+- Unless stated otherwise, the constants are the phantom's and the white paper's {cite:p}`alsop2015`: $\lambda$
   0.9, $T_{1b}$ 1.65 s, $\alpha$ 0.85 for PCASL, and the tissue values of the table in
   [Chapter 1](../01-mri-physics/01-spins-and-relaxation.md).
 

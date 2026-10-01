@@ -24,6 +24,9 @@ for pkg in ["numpy", "scipy", "nibabel", "matplotlib", "pandas", "scikit-image",
         print(f"{pkg:<14} not installed")
 ```
 
+The numerical work in every page rests on NumPy {cite:p}`harris2020` and SciPy
+{cite:p}`virtanen2020`, and the figures are drawn with Matplotlib {cite:p}`hunter2007`.
+
 ## Creating the environment
 
 ```bash
@@ -62,8 +65,8 @@ build ([Appendix A](./a-aslscan-cookbook.md)):
 | Tool | Role | Where it runs |
 |---|---|---|
 | aslscan (with the mrsim-acq library) | the simulator and its ground truth | a native binary built from the commit pinned in the pipeline configuration, with `cargo build --release --features cli,kspace,par` |
-| ASLDRO's `hrgt_icbm_2009a_nls_3t` | the phantom, converted by aslscan's `tools/hrgt_to_bids.py` | once, before the pipeline |
-| Snakemake | pipeline driver | the `aslbook` environment |
+| ASLDRO's `hrgt_icbm_2009a_nls_3t` {cite:p}`olivertaylor2021` | the phantom, converted by aslscan's `tools/hrgt_to_bids.py` | once, before the pipeline |
+| Snakemake {cite:p}`molder2021` | pipeline driver | the `aslbook` environment |
 
 ## Reproducibility
 

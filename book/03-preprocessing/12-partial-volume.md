@@ -7,7 +7,7 @@ kernelspec:
 
 :::{admonition} Simulated datasets in this chapter
 :class: note
-- **Built in this page:** the tissue fractions of every acquisition voxel from the packaged phantom slab, a noise-free reference series on it, an "atrophied" copy of the slab, and a toy perfusion map with a focal lesion ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **Built in this page:** the tissue fractions of every acquisition voxel from the packaged phantom slab, a noise-free reference series on it, an "atrophied" copy of the slab, and a toy perfusion map with a focal lesion, without noise and with noise at the reference level ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`ref-pcasl`**: the reference series, 30 pairs at noise σ ≈ 40 ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
 - **`ref-clean`**: the same acquisition with the noise switched off ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-clean)).
 - **`voxel-sweep`**: the reference protocol at 2.5, 3.5 and 5 mm in-plane voxels ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-voxel-sweep)).
@@ -22,7 +22,7 @@ After this chapter you can:
 - explain why the perfusion measured in a voxel is the fraction-weighted mean of the tissues it contains, and why that matters more for ASL than for most other MRI contrasts
 - read the classic scatter of measured CBF against gray-matter fraction and say what its slope, intercept and spread mean
 - say how partial volume biases a group's gray-matter CBF, the GM/WM ratio, and a comparison between groups with different cortical thickness
-- apply the linear-regression partial-volume correction of {cite:t}`asllani2008`, and state what it costs in spatial resolution
+- apply the linear-regression partial-volume correction of {cite:t}`asllani2008` and a book-sized version of the Bayesian correction of {cite:t}`chappell2011`, and state what the kernel of the one and the learned spatial prior of the other cost in spatial resolution
 - choose a voxel size knowing what it does to the fraction of the cortex that is "pure" gray matter
 
 ```{code-cell} python
@@ -62,7 +62,8 @@ def mean_diff(run):
 
 ## The physics: a voxel is a mixture
 
-An ASL voxel of 3.5 × 3.5 × 5 mm holds 61 µl of brain. The cortex is 2 to 3 mm thick and
+An ASL voxel of 3.5 × 3.5 × 5 mm holds 61 µl of brain. The cortex is a thin sheet,
+one to two voxels across on this grid (the first figure shows it), and
 folded, so most cortical voxels also contain white matter, cerebrospinal fluid (CSF), or
 both. Each tissue contributes its own signal in proportion to the volume it occupies. For
 the control image that is a nuisance; for the difference image it is the whole
@@ -93,9 +94,9 @@ this chapter, only the 1 mm phantom the voxels were cut from.
 
 :::{admonition} A bias that is not partial volume
 :class: note
-The white-paper formula assumes the label decays with the T1 of blood until the readout.
-In this phantom, as in the general kinetic model of [Chapter 5](../02-labeling/05-kinetic-model.md),
-the label decays with the tissue's T1 (1.33 s in GM, against 1.65 s in blood) once it has
+The white-paper formula {cite:p}`alsop2015` assumes the label decays with the T1 of blood
+until the readout. In this phantom, as in the general kinetic model
+{cite:p}`buxton1998` of [Chapter 5](../02-labeling/05-kinetic-model.md), the label decays with the tissue's T1 (1.33 s in GM, against 1.65 s in blood) once it has
 arrived, so the formula returns about 44 ml/100 g/min for a pure gray-matter voxel whose
 true value is 60. [Chapter 14](../04-quantification/14-cbf-quantification.md) measures that
 bias. To keep it out of a chapter about mixing, every CBF map here is multiplied by the
@@ -289,7 +290,12 @@ group, or between patients and controls, measures this mixture of perfusion and 
 unless the fractions are accounted for, which is the job of the correction below
 {cite:p}`asllani2008`. In practice the fractions come from a segmented T1-weighted image
 resampled to the ASL grid, so the correction is only as good as the segmentation and the
-registration between the two images.
+registration between the two images. {cite:t}`petr2018` estimated the systematic errors
+that the mismatch in resolution and in geometric distortion between the ASL and
+T1-weighted images leaves in the fraction maps, and measured what they do to the mean
+gray-matter CBF obtained with a threshold, with gray-matter weighting and with the
+regression correction. Errors of that kind are systematic: they push every subject's
+value the same way and do not average out over a group.
 
 ## See it: voxel size
 
@@ -388,8 +394,11 @@ top. The corrected gray-matter map is nearly flat, which is what the phantom's c
 in the voxels that are at least half gray it has a mean of 61.9 with a 5 × 5 kernel,
 against an uncorrected mean of 54.6 (the truth in the same voxels being 53.6, the
 weighted mean). The two units above 60 are not noise: the noise-free `ref-clean` run gives
-61.7, because the regression is handed sharp fractions and a map the EPI readout has
-blurred, so a little of each voxel's cortex is credited to its neighbors' fractions. The
+61.7. Most of the excess comes from regressing on a CBF map, in which every voxel has
+already been divided by its own $M_0$: at the edge of the head a voxel's CBF is not
+lowered by the air it contains while its gray fraction is, so the regression credits
+those neighborhoods with too much perfusion per unit of gray matter. The section on the
+Bayesian alternative below measures it. The
 white-matter map is flat and dark at 9.5, the apparent pure-white value of this
 quantification, not 20: the correction returns the pure-tissue values the quantification
 assigns, and it cannot fix a bias that sits in the kinetic constants rather than in the
@@ -445,17 +454,288 @@ loses the spatial detail a lesion study wants; a small one keeps the detail and 
 the noise. The kernel should be chosen for the question, and a corrected map should never
 be read at a finer scale than its kernel.
 
-:::{dropdown} The Bayesian alternative
-{cite:t}`chappell2011` put the same two-tissue model inside the kinetic-model fit of BASIL,
-with a spatial prior on each tissue's perfusion instead of a fixed kernel: neighboring
-voxels are encouraged, not forced, to share a value, and the strength of the encouragement
-is estimated from the data. The result adapts the effective kernel to the local
-signal-to-noise ratio and can give the two tissues different kinetic parameters (a longer
-transit time for white matter, for instance), which the linear regression cannot. It is
-the correction `oxford_asl --pvcorr` applies. Its assumptions are the same as the regression's
-in one respect: the fractions are taken as known, so segmentation and registration errors
-pass straight through.
-:::
+## The Bayesian alternative: a spatial prior instead of a kernel
+
+The partial-volume correction of FSL's BASIL, the one `oxford_asl --pvcorr` applies, starts
+from the same mixing equation and treats it differently {cite:p}`chappell2011`. It does not
+correct a finished CBF map. It puts the two tissues inside the kinetic-model fit: the
+difference signal of voxel $i$ is modeled as
+
+$$
+\Delta M_i(t) = P_{\text{GM},i}\,\Delta M_\text{GM}\!\left(t;\, f_{\text{GM},i}, \delta_{\text{GM},i}\right)
+ + P_{\text{WM},i}\,\Delta M_\text{WM}\!\left(t;\, f_{\text{WM},i}, \delta_{\text{WM},i}\right),
+$$
+
+where $\Delta M_\text{GM}$ and $\Delta M_\text{WM}$ are the kinetic model of
+[Chapter 5](../02-labeling/05-kinetic-model.md) evaluated with each tissue's own perfusion
+$f$, transit time $\delta$ and $T_1$. The fractions $P$ are taken as known. In practice
+they are the partial-volume estimates of a T1-weighted segmentation, FSL's FAST
+{cite:p}`zhang2001`, resampled to the ASL grid. CSF has no term: it is excluded from the
+model, not estimated.
+
+One voxel still gives one measurement per delay for two perfusions. What makes the problem
+solvable is a **spatial prior** on each tissue's perfusion map: an adaptive Gaussian prior
+that correlates every voxel with its neighbors {cite:p}`groves2009` (a Gaussian process
+in that paper; a Markov random field on the voxel grid in the version built below). It
+states that a voxel's value is probably close to its neighbors', with a strength that is
+itself determined from the data. The fit is the variational Bayesian inference of {cite:t}`chappell2009`,
+the same machinery BASIL uses without partial-volume correction
+([Chapter 15](../04-quantification/15-multi-delay.md)). Four things differ from the
+regression:
+
+- **There is no kernel.** Every voxel is tied to its nearest neighbors, they to theirs,
+  and information spreads as far as the data allow; there is no window whose edge decides
+  which voxels are pooled.
+- **The smoothing strength is adaptive.** It is learned from the data, one value per
+  parameter map, and each voxel then leans on its neighbors in proportion to how little
+  its own data say: a voxel that is 10 % gray matter borrows nearly all of its gray-matter
+  perfusion, a voxel that is 100 % gray matter much less.
+- **The model is the kinetic model.** With multi-delay data each tissue gets its own
+  perfusion and its own transit time, and the different kinetics of the two tissues help
+  to separate them; the regression works on one finished map at a time.
+- **The fit is to $\Delta M$, and CSF is excluded.** Calibration by $M_0$ comes after the
+  correction, not before it, which matters at the edge of the head, as the numbers below show.
+
+### A book-sized version
+
+At a single delay the kinetic model of each tissue is linear in its perfusion: a pure
+voxel in slice $z$ gives $\Delta M = s_z f$, where $s_z$ is the white-paper formula read
+backwards (with this chapter's kinetic factor and the tissue's calibrated $M_0$), the
+signal in image units per ml/100 g/min. The two-tissue model is then linear in its
+unknowns,
+
+$$
+\Delta M_i = s_{\text{GM},z}\,P_{\text{GM},i}\,f_{\text{GM},i} + s_{\text{WM},z}\,P_{\text{WM},i}\,f_{\text{WM},i} + \varepsilon_i,
+\qquad \varepsilon_i \sim \mathcal{N}(0, \sigma^2),
+$$
+
+and with Gaussian priors the posterior is Gaussian, so its maximum is the solution of one
+sparse linear system. With $\widehat{\Delta M}_i$ the model's prediction for voxel $i$,
+the estimate minimizes
+
+$$
+\frac{1}{\sigma^2}\sum_i \left(\Delta M_i - \widehat{\Delta M}_i\right)^2 + \phi\,Q, \qquad
+Q = \sum_{i \sim j} \left(f_{\text{GM},i} - f_{\text{GM},j}\right)^2
+ + 100 \sum_{i \sim j} \left(f_{\text{WM},i} - f_{\text{WM},j}\right)^2 ,
+$$
+
+where $i \sim j$ runs over the pairs of neighboring voxels in the brain mask (six
+neighbors in 3D) and $\phi$ is the strength of the gray-matter prior. White matter is
+given a prior a hundred times stronger, which holds its map close to a single value: its
+signal is a fifth of gray matter's and cannot support more. The noise $\sigma$ is not
+fitted; it is measured from the spread of the 30 pairs. This is a maximum a posteriori
+estimate of a linear model, a ridge regression whose penalty is on differences between
+neighbors.
+
+The strength $\phi$ is chosen by the evidence, the probability of the data given $\phi$
+with the perfusion maps integrated out, not by an empirical rule. For a linear Gaussian
+model the evidence is at its maximum where the penalty at the solution, $\phi\,Q$, equals
+$\gamma$, the number of parameters the data determine {cite:p}`mackay1992` (the trace of
+the matrix that maps the data to the fitted data, less the two mean values the prior
+leaves free). The cell finds that point by bisection on $\log \phi$, estimating the trace
+with two random probe vectors {cite:p}`hutchinson1990`, and solves every system by
+conjugate gradients. {cite:t}`groves2009` also set
+the smoothness of their prior by optimizing the evidence, inside a variational fit of a
+nonlinear model; the criterion here is of the same kind, the algorithm is not BASIL's.
+
+```{code-cell} python
+from scipy import sparse
+from scipy.sparse.linalg import cg
+
+
+def grid_laplacian(mask):
+    """Graph Laplacian L of the 6-neighbor voxel grid inside ``mask``: x @ L @ x is the sum of
+    the squared differences between neighboring voxels."""
+    idx = np.full(mask.shape, -1)
+    idx[mask] = np.arange(mask.sum())
+    edges = []
+    for axis in range(3):
+        a = np.moveaxis(idx, axis, 0)
+        both = (a[:-1] >= 0) & (a[1:] >= 0)
+        edges.append(np.stack([a[:-1][both], a[1:][both]]))
+    i, j = np.concatenate(edges, axis=1)
+    adj = sparse.coo_matrix((np.ones(i.size), (i, j)), shape=(mask.sum(),) * 2)
+    adj = adj + adj.T
+    return sparse.diags(np.asarray(adj.sum(1)).ravel()) - adj
+
+
+def spatial_pvc(y, G, W, mask, sigma, phi=None, wm_ratio=100.0, seed=0):
+    """Maximum a posteriori f_GM, f_WM of y = G f_GM + W f_WM + noise (SD sigma) under
+    Gaussian-MRF priors of strength phi (GM) and wm_ratio * phi (WM). With phi=None the
+    strength is learned: bisection on log(phi) for the maximum of the evidence.
+    Returns (f_gm, f_wm, phi, gamma)."""
+    n, gamma = int(mask.sum()), np.nan
+    H = sparse.hstack([sparse.diags(G[mask] / sigma), sparse.diags(W[mask] / sigma)]).tocsr()
+    L = grid_laplacian(mask)
+    P = sparse.block_diag([L, wm_ratio * L]).tocsr()
+    b = H.T @ (y[mask] / sigma)
+    probes = H.T @ np.random.default_rng(seed).choice([-1.0, 1.0], (n, 2))
+
+    def solve(phi, rhs):
+        A = (H.T @ H + phi * P + 1e-9 * sparse.eye(2 * n)).tocsr()
+        return cg(A, rhs, rtol=1e-8, maxiter=20000, M=sparse.diags(1 / A.diagonal()))[0]
+
+    lo, hi = (1e-4, 1.0) if phi is None else (phi, phi)
+    for _ in range(8 if phi is None else 0):
+        phi = np.sqrt(lo * hi)
+        a = solve(phi, b)
+        gamma = np.mean([q @ solve(phi, q) for q in probes.T]) - 2    # parameters the data determine
+        lo, hi = (phi, hi) if gamma > phi * (a @ (P @ a)) else (lo, phi)   # evidence still rising: go stronger
+    phi = np.sqrt(lo * hi)
+    a = solve(phi, b)
+    f_gm, f_wm = np.zeros(mask.shape), np.zeros(mask.shape)
+    f_gm[mask], f_wm[mask] = a[:n], a[n:]
+    return f_gm, f_wm, phi, gamma
+```
+
+The function takes the data `y`, the two coefficient maps (fraction times signal per unit
+of CBF) and the noise level, and returns the two perfusion maps in ml/100 g/min, the
+strength it used, and $\gamma$. On `ref-pcasl` the data are the mean difference image in
+image units, and each tissue is calibrated with the mean of the corrected $M_0$ image in
+its own pure voxels.
+
+```{code-cell} python
+:tags: [hide-input]
+d_ref = quant.subtract(ref.mag(), ref.context())
+dm_ref = d_ref.mean(-1)
+sigma_dm = np.median(d_ref.std(-1, ddof=1)[mask]) / np.sqrt(d_ref.shape[-1])   # noise of the mean difference
+plds = quant.slice_plds(p_ref["PostLabelingDelay"], protocols.slice_offsets(p_ref))
+per_cbf = 1 / (quant.cbf_pcasl(1.0, 1.0, plds) * kinetic_factor(plds))        # ΔM / M0 per ml/100 g/min, per slice
+m0c = quant.m0_correction(ref.m0scan(), tr=8.0, te=p_ref["EchoTime"])
+sens = {t: m0c[fr[t] >= 0.99].mean() * per_cbf for t in ("gm", "wm")}          # image units per ml/100 g/min
+G, W = fr["gm"] * sens["gm"], fr["wm"] * sens["wm"]
+b_gm, b_wm, phi_ref, gamma_ref = spatial_pvc(dm_ref, G, W, mask, sigma_dm)
+bc_gm, bc_wm, _, _ = spatial_pvc(mean_diff(clean), G, W, mask, sigma_dm, phi=phi_ref)
+bs_gm, _, _, _ = spatial_pvc(dm_ref, G, W, mask, sigma_dm, phi=10 * phi_ref)
+
+fig, axes = plt.subplots(1, 4, figsize=(13, 3.3))
+show_slice(axes[0], determined(f_gm5, fr["gm"]), K, "GM CBF, 5 × 5 regression", kind="cbf")
+show_slice(axes[1], determined(b_gm, fr["gm"]), K, "GM CBF, spatial prior", kind="cbf")
+show_slice(axes[2], determined(f_wm5, fr["wm"]), K, "WM CBF, 5 × 5 regression", kind="cbf")
+show_slice(axes[3], determined(b_wm, fr["wm"]), K, "WM CBF, spatial prior", kind="cbf")
+fig.tight_layout()
+
+print(f"signal per unit of CBF at the display slice: GM {sens['gm'][K]:.3f}, WM {sens['wm'][K]:.3f} image units per ml/100 g/min; "
+      f"noise of the mean difference: {sigma_dm:.1f} image units")
+print(f"learned strength: phi = {phi_ref:.3f} (prior SD of the difference between neighbors {1 / np.sqrt(phi_ref):.1f} ml/100 g/min); "
+      f"the data determine {gamma_ref:.0f} of the {2 * mask.sum()} unknowns")
+print(f"spatial prior:    GM CBF in voxels >= 50 % GM: mean {b_gm[gm_roi].mean():.1f}, SD {b_gm[gm_roi].std():.1f} (truth 60); "
+      f"WM CBF in voxels >= 50 % WM: mean {b_wm[wm_roi].mean():.1f}, SD {b_wm[wm_roi].std():.2f} (truth 20, apparent {WM_APPARENT:.1f})")
+print(f"5 × 5 regression: GM CBF in voxels >= 50 % GM: mean {f_gm5[gm_roi].mean():.1f}, SD {f_gm5[gm_roi].std():.1f}; "
+      f"WM CBF in voxels >= 50 % WM: mean {f_wm5[wm_roi].mean():.1f}, SD {f_wm5[wm_roi].std():.1f}")
+print(f"spatial prior at ten times the learned strength: GM mean {bs_gm[gm_roi].mean():.1f}, SD {bs_gm[gm_roi].std():.2f}; "
+      f"on ref-clean (no noise) at the learned strength: GM {bc_gm[gm_roi].mean():.1f}, WM {bc_wm[wm_roi].mean():.1f}")
+near_edge = ndimage.minimum_filter(np.where(mask, fr["gm"] + fr["wm"] + fr["csf"], 1.0), size=(5, 5, 1)) < 0.99
+r_gm, _ = quant.pv_correct(dm_ref / sens["gm"], fr["gm"], fr["wm"], kernel=5, mask=mask)    # the regression on ΔM
+t_gm, _ = quant.pv_correct(cbf_toy, fr["gm"], fr["wm"], kernel=5, mask=mask)                # and on the toy CBF map
+print(f"5 × 5 regression on the CBF map: GM {f_gm5[gm_roi & near_edge].mean():.1f} in the {(gm_roi & near_edge).sum()} voxels whose kernel holds a voxel partly "
+      f"outside the head, {f_gm5[gm_roi & ~near_edge].mean():.1f} in the other {(gm_roi & ~near_edge).sum()}; on the toy CBF map (no readout, no noise) "
+      f"{t_gm[gm_roi].mean():.1f}; on ΔM instead of CBF {r_gm[gm_roi].mean():.1f}")
+```
+
+The learned strength is $\phi$ = 0.059, a prior under which neighboring voxels differ by
+about 4 ml/100 g/min, and at that strength the data determine about 150 of the 52,092
+unknowns. The gray-matter map (second panel) is nearly uniform: 60.4 ml/100 g/min in the
+voxels that are at least half gray, with an SD of 0.4 where the 5 × 5 regression has 7.4.
+The white-matter map is a single value, 9.4, where the regression gives 9.5 with an SD of
+8.5: again the apparent pure-white value of this quantification (9.9 in the pure voxels),
+not 20, because a prior cannot repair the kinetic bias any more than a kernel can. The
+prior has done what an adaptive prior should on this phantom. The cortex is flat, 30 pairs
+contain no evidence against that, and the evidence chooses a strong prior. Beyond the
+learned value the map hardly changes (at ten times the strength the mean is still 60.4
+and the SD 0.07), and with a truth that is exactly flat the evidence has little reason to
+prefer one strong prior to another, so the learned value should be read as "strong", not
+as a sharp optimum. This is the most favorable case there is for any method that pools
+voxels. A real cortex, whose perfusion varies from region to region, holds the strength
+down.
+
+The mean is also closer to 60 than the regression's 61.9, and that is not the prior's
+doing. The same 5 × 5 regression applied to $\Delta M$ instead of the CBF map gives 60.5.
+Applied to the CBF map it gives 63.0 in the 7,323 gray voxels whose kernel holds a voxel
+partly outside the head and 61.0 in the other 8,912, and it gives 61.4 on the toy map,
+which has neither readout nor noise. A CBF map is $\Delta M$ divided by each voxel's own
+$M_0$. In a voxel that is half outside the head both are halved, so its CBF stays at 60
+while its gray fraction says 0.5, and a regression on CBF concludes that the gray matter
+there is perfused at 120. Fitting $\Delta M$ and calibrating afterwards removes that
+error, and it is the order BASIL works in. The 0.2 that remains on the noise-free
+`ref-clean` run (60.2) is within what the readout does to a difference image
+([Chapter 5](../02-labeling/05-kinetic-model.md)).
+
+### The lesion again
+
+The 5 × 5 kernel smoothed a focal deficit away. Whether the prior does better depends on
+the strength it learns, so the test needs noise: without noise there is nothing for the
+evidence to weigh the structure against. The cell adds Gaussian noise to the lesion toy's
+mixed map at the level of the reference series (an SD of 22 ml/100 g/min, the noise of
+the 30-pair mean at the display slice) and corrects the same noisy map four ways: with the
+two kernels, with the spatial prior at the strength it learns from that map, and with the
+prior at a strength set by hand to 0.001.
+
+```{code-cell} python
+:tags: [hide-input]
+sigma_toy = sigma_dm / sens["gm"][K]          # the reference series' noise, in CBF units at the display slice
+noisy = cbf_mixed + np.random.default_rng(0).normal(0, sigma_toy, cbf_mixed.shape)
+toy = (noisy, ph["gm"], ph["wm"], ph["mask"])
+n_gm5, _ = quant.pv_correct(*toy[:3], kernel=5, mask=ph["mask"])
+n_gm3, _ = quant.pv_correct(*toy[:3], kernel=3, mask=ph["mask"])
+s_gm, _, phi_toy, gamma_toy = spatial_pvc(*toy, sigma_toy)                 # strength learned from the lesioned map
+w_gm, _, phi_weak, _ = spatial_pvc(*toy, sigma_toy, phi=0.001)             # strength set by hand
+z_gm, _, _, _ = spatial_pvc(cbf_mixed, *toy[1:], sigma_toy, phi=phi_toy)   # learned strength, noise-free map
+
+results = [("5 × 5 kernel", n_gm5), (f"spatial prior, learned φ = {phi_toy:.4f}", s_gm), (f"spatial prior, φ = {phi_weak:g}", w_gm)]
+fig, axes = plt.subplots(1, 4, figsize=(13, 3.3))
+show_slice(axes[0], np.where(ph["mask"], noisy, np.nan), K, f"measured (mixed), noise SD {sigma_toy:.0f}", kind="cbf")
+for ax, (name, est) in zip(axes[1:], results):
+    show_slice(ax, determined(est, ph["gm"]), K, f"GM CBF, {name}", kind="cbf")
+for ax in axes:
+    ax.add_patch(plt.Circle((cx, ph["gm"].shape[1] - 1 - cy), RADIUS_MM / vx, fill=False, color="white", lw=0.8, ls="--"))
+fig.tight_layout()
+
+print(f"noise added to the mixed map: SD {sigma_toy:.1f} ml/100 g/min; learned strength phi = {phi_toy:.4f} "
+      f"(the data determine {gamma_toy:.0f} unknowns), against {phi_ref:.3f} on ref-pcasl")
+for name, est in results + [("3 × 3 kernel", n_gm3)]:
+    print(f"{name:38s}: GM CBF inside the deficit {est[core].mean():.1f} (truth 30.0); "
+          f"unaffected cortex mean {est[outside].mean():.1f}, SD {est[outside].std():.1f}")
+print(f"spatial prior at the learned strength on the noise-free map: {z_gm[core].mean():.1f} inside the deficit, {z_gm[outside].mean():.1f} outside")
+```
+
+With a lesion in the map the evidence settles on $\phi$ = 0.0085, a seventh of what it
+chose for the flat cortex of `ref-pcasl`, and the data now determine about 800 unknowns:
+the prior has adapted to the structure. It has not adapted enough to keep the deficit.
+Inside the sphere the estimate is 47.0 ml/100 g/min against a truth of 30, worse than the
+5 × 5 kernel's 41.1 on the same noisy map, and it is the smoothing that does it, not the
+noise: the same strength on the noise-free map gives 46.9. What the prior bought instead
+is a quiet cortex, an SD of 2.1 in the unaffected gray matter against the kernel's 6.6
+(third panel against second). The reason is that the strength is one number for the whole
+map. It is learned from 16,235 gray voxels of which 318 are in the lesion, the evidence
+finds that averaging pays everywhere else, and the lesion is the price.
+
+With the strength set by hand to 0.001 the comparison reverses (fourth panel). The deficit
+reads 36.9, as deep as the 3 × 3 kernel's 37.5, at a noise of 7.2 where the 3 × 3 kernel
+has 10.5 and the 5 × 5 kernel 6.6. At comparable noise the prior keeps more of the lesion
+than the kernel does, because it pools in three dimensions and weights every voxel by what
+its data are worth; the learned strength simply sits at a different point of the trade.
+So the answer to whether a spatial prior preserves a focal deficit better than the 5 × 5
+kernel is conditional: at a matched noise level yes, at the strength the evidence learns
+from this map no. The toy is the least favorable case for a single learned strength, a
+cortex that is exactly flat except for one small lesion. In a real cortex perfusion varies
+everywhere, the evidence chooses a weaker prior, and more of a focal deficit survives:
+on simulated and in vivo multi-delay data {cite:t}`chappell2011` report a correction of
+gray-matter CBF comparable to the regression's with more spatial detail preserved. A
+systematic comparison on simulated and in vivo PCASL data found both sides of the trade
+{cite:p}`zhao2017pvc`: the spatially regularized method was the better
+at preserving short-scale variation in gray-matter CBF, and the regression the less
+sensitive to noise and to errors in the fractions, which the authors attribute to its
+greater smoothing. The
+practical reading is the same as for
+the kernel: an adaptive prior chooses its resolution for the whole map, and a corrected
+map should not be searched for lesions smaller than the smoothing it was given.
+
+Two assumptions are shared with the regression. The fractions are taken as known, so
+segmentation and registration errors pass straight through {cite:p}`petr2018,zhao2017pvc`. And the
+correction returns the pure-tissue values of the model it is given: here a single-delay
+model with a kinetic bias in white matter, in BASIL a kinetic model whose transit times and
+relaxation times must be right for each tissue.
 
 ## Measure it: the corrected maps against the truth
 
@@ -467,21 +747,26 @@ voxels, so it can be compared with the fraction-weighted truth on equal terms.
 :tags: [hide-input]
 recon5 = fr["gm"] * f_gm5 + fr["wm"] * f_wm5
 recon3 = fr["gm"] * f_gm3 + fr["wm"] * f_wm3
-for name, est in (("uncorrected", cbf_ref), ("reconstructed, 5 × 5", recon5), ("reconstructed, 3 × 3", recon3)):
+recon_b = fr["gm"] * b_gm + fr["wm"] * b_wm
+for name, est in (("uncorrected", cbf_ref), ("reconstructed, 5 × 5", recon5), ("reconstructed, 3 × 3", recon3), ("reconstructed, spatial prior", recon_b)):
     sc_ = quant.score(est, truth, mask)
     sg = quant.score(est, truth, gm_roi)
-    print(f"{name:22s}: slab RMSE {sc_['rmse']:5.1f}, bias {sc_['bias']:+5.1f}; GM (>= 50 %) RMSE {sg['rmse']:5.1f}, bias {sg['bias']:+5.1f} ml/100 g/min")
+    print(f"{name:28s}: slab RMSE {sc_['rmse']:5.1f}, bias {sc_['bias']:+5.1f}; GM (>= 50 %) RMSE {sg['rmse']:5.1f}, bias {sg['bias']:+5.1f} ml/100 g/min")
 fig, axes = plotting.fit_vs_truth(recon5, truth, mask, "CBF (5 × 5 reconstruction)", k=K, unit="(ml/100 g/min)")
 ```
 
 Over the slab the uncorrected map has an RMSE of 25.0 against the truth and the
-5 × 5 reconstruction 8.3, the 3 × 3 one 11.1. The improvement is mostly denoising, not
-partial-volume correction: the regression pools 25 voxels, so its reconstruction is a
-smoothed version of the data, and the truth it is scored against is itself the
-fraction-weighted mean. The bias stays slightly negative (−2.0 uncorrected, −2.4 with the
-5 × 5 kernel over the slab) because the reconstruction puts the underestimated
-white-matter value back into every mixed voxel, where the uncorrected map's noise had
-hidden it. In the 4-panel
+5 × 5 reconstruction 8.3, the 3 × 3 one 11.1, the spatial prior's 5.5 (in the voxels that
+are at least half gray, 6.6 for the 5 × 5 kernel and 1.6 for the prior). The improvement
+is mostly denoising, not partial-volume correction: the regression pools 25 voxels and the
+prior more, so each reconstruction is a smoothed version of the data, the truth it is
+scored against is itself the fraction-weighted mean, and on a phantom whose pure-tissue
+perfusion is flat the method that pools most scores best. The bias stays negative (−2.0
+uncorrected, −2.4 with the 5 × 5 kernel, −3.3 with the spatial prior over the slab) because
+the reconstruction puts the underestimated white-matter value back into every mixed voxel,
+where the uncorrected map's noise had hidden it; the prior's is the largest because its
+gray-matter values are not inflated at the edge of the head, which in the regression
+offsets part of the white-matter deficit. In the 4-panel
 the difference map is smooth noise with a faint dark white matter, and the scatter hugs
 the identity line in gray matter and falls below it at low CBF. What the correction
 changes is not the map's error but its interpretation: the corrected gray-matter value no
@@ -502,13 +787,26 @@ longer depends on the threshold, the cortical thickness, or the voxel size.
 - **Report the mask.** A gray-matter CBF is a number attached to a threshold and a
   segmentation; report both, and prefer corrected pure-tissue values when groups differ in
   anatomy.
-- **Choose the kernel for the question.** Group means tolerate a 5 × 5 kernel; focal
-  deficits need 3 × 3 or the adaptive Bayesian prior, and more averaging to pay for it.
+- **Choose the smoothing for the question.** Group means tolerate a 5 × 5 kernel or a
+  spatial prior at its learned strength; focal deficits need a 3 × 3 kernel or a weaker
+  prior, and more averaging to pay for it. An adaptive prior is not a guarantee of detail:
+  on a cortex that was flat except for a 10 mm lesion it read 47 where the truth was 30.
+- **Multi-delay data give a model-based correction more to work with.** The two tissues
+  differ in transit time and $T_1$, not only in perfusion, and a fit that models both
+  uses that difference to separate them {cite:p}`chappell2011`.
 
 ## Further reading
 
 The regression method is {cite:t}`asllani2008`; the Bayesian spatial version in BASIL is
-{cite:t}`chappell2011`. The consensus recommendations of {cite:t}`alsop2015` discuss partial
+{cite:t}`chappell2011`, built on the spatial prior of {cite:t}`groves2009` and the
+variational Bayesian fit of {cite:t}`chappell2009`, with fractions from a segmentation such
+as FAST {cite:p}`zhang2001`. The evidence criterion of the book-sized version is
+{cite:t}`mackay1992` and its trace estimator {cite:t}`hutchinson1990`. {cite:t}`zhao2017pvc`
+compare the regression and the spatially regularized correction for the detail they
+preserve and their sensitivity to noise and to errors in the fractions, and
+{cite:t}`petr2018` measure what systematic errors in the
+fraction maps do to gray-matter CBF under thresholding, weighting and regression. The
+consensus recommendations of {cite:t}`alsop2015` discuss partial
 volume among the reasons ASL gray-matter values vary between studies, and the ASLPrep
 {cite:p}`adebimpe2022` and ExploreASL {cite:p}`mutsaerts2020` pipelines both implement the
 regression correction as an optional last step, which is where

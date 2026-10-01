@@ -54,9 +54,12 @@ only capillary delivery.
 
 Kety and Schmidt measured a whole-brain average of about 54 ml/100 g/min in young adults by
 following an inhaled inert gas {cite:p}`kety1948`, and the number has held up. It hides a
-large difference between tissues: gray matter, with its dense synapses and high metabolic
-rate, is perfused at roughly 40 to 100 ml/100 g/min depending on the person, the region
-and the method; white matter at about 20. The simulated brain makes these numbers exact:
+large difference between tissues and between people. Gray matter values from 40 to
+100 ml/100 g/min can all be normal {cite:p}`alsop2015`: healthy people of the same age and
+sex differ by up to a factor of two, and gray matter perfusion declines with age
+{cite:p}`parkes2004`. White matter is perfused at a fraction of the gray matter rate, low
+enough that detecting it with ASL takes long averaging {cite:p}`vanosch2009`. The
+simulated brain makes the numbers exact:
 $f = 60$ in every gray matter voxel, $f = 20$ in every white matter voxel, and 0 in CSF.
 
 In the formulas below $f$ is needed per second and per gram, so ml/100 g/min is divided by
@@ -138,19 +141,29 @@ later. Blood water is a tracer with an expiry, and protocol design ([Chapter 7](
 ## Arterial transit time
 
 Labeling happens in the neck or at the base of the brain, several centimeters below the
-tissue being imaged. Blood covers that distance at 20–40 cm/s in the carotid arteries and
+tissue being imaged. Blood moves fastest in the large arteries of the neck and
 slows as the arteries branch and narrow, so the first labeled water reaches a voxel's
 capillaries only after a delay: the **arterial transit time (ATT)**, $\delta$ in the
-kinetic model, typically 0.5–1.5 s in healthy adult gray matter and 0.5–2 s across brains
-and regions. It is longer
+kinetic model. In healthy gray matter it is between 0.5 and 1.5 s, depending on where the
+label is applied and where the tissue lies {cite:p}`alsop2015`; with pulsed labeling,
+regional means of 0.6 to 0.9 s were measured across the lobes of healthy young adults
+{cite:p}`macintosh2010`, and it differs from region to region within one brain
+{cite:p}`dai2012`. It is longer
 
-- in **white matter**, fed by long penetrating arterioles at a third of the gray matter flow;
-- in **watershed regions** at the borders between the territories of the major arteries;
-- in the **elderly**, whose flow is slower and whose vessels are longer and more tortuous;
-- in **vascular disease**: a stenosed carotid or a collateral route can delay arrival by a
-  second or more, beyond what a standard protocol was designed for.
+- in **white matter**, whose flow is lower and whose label arrives later; in deep white
+  matter the transit time can be 2 s or more {cite:p}`alsop2015`;
+- in **watershed regions** at the borders between the territories of the major arteries,
+  the most distal part of each territory {cite:p}`alsop2015`;
+- in the **elderly**, for whom the consensus delay is lengthened {cite:p}`alsop2015`;
+- in **vascular disease**, where reduced or collateral flow can push the transit time to
+  2 s or more, beyond what a standard protocol was designed for
+  {cite:p}`alsop2015,dai2012`.
 
-It is shorter in children and under hypercapnia. The phantom uses 0.8 s for gray matter
+It is shorter in children, for whom the consensus delay is shortened {cite:p}`alsop2015`.
+These dependences are why the consensus
+recommendations set the delay before imaging by population, and why
+acquisitions at several delays are recommended as the way to account for a variable
+transit time {cite:p}`woods2024`. The phantom uses 0.8 s for gray matter
 and 1.2 s for white matter. Because the label decays while it travels, a longer ATT means
 less label for the same $f$, and imaging before the label has arrived measures none
 ([Chapter 5](./05-kinetic-model.md)); [Chapter 15](../04-quantification/15-multi-delay.md) shows how to measure the ATT itself.
@@ -204,7 +217,8 @@ blank, as is everything outside the brain). Every ground-truth map the pipeline 
 The animation integrates the labeled-water equation for a gray matter voxel under the
 reference protocol: a bolus of inverted arterial water 1.8 s long that starts arriving
 0.8 s after labeling begins, with $f = 60$ ml/100 g/min, $\lambda = 0.9$, $\alpha = 0.85$,
-$T_{1b} = 1.65$ s and a tissue T1 of 1.33 s. On the left, the artery's color shows the
+$T_{1b} = 1.65$ s and a tissue T1 of 1.33 s (the phantom's gray matter value, which is
+that of {cite:t}`wansapura1999` at 3 T). On the left, the artery's color shows the
 label it carries and the voxel's color the label it has accumulated; on the right are the
 two curves, in units of the tissue's $M_0$. The blood was inverted to $2 \alpha / \lambda = 189$ % of $M_0$
 at the labeling plane, and every ml that arrives has spent the same 0.8 s in transit, so
@@ -348,8 +362,9 @@ Read the bars left to right, on a logarithmic scale. Inverting the arterial wate
 deficit of 189 % of the tissue's $M_0$ per ml of blood. In 1.8 s a gram of gray matter
 receives 1.1 % of its volume in blood after allowing for decay during the bolus, so the
 delivered label is 2.1 % of $M_0$. Waiting 1.8 s more for the label to reach and fill the
-tissue costs a factor of three: 0.70 %. Across the range of gray matter flows the estimate
-runs from about 0.5 % to 1 %; in white matter it is 0.23 %. The consequence is that ASL is
+tissue costs a factor of three: 0.70 %. The estimate is proportional to the flow, so across
+the normal range of gray matter flows it runs from about 0.5 % to 1 %; in the phantom's
+white matter it is 0.23 %. The consequence is that ASL is
 limited by noise. The reference protocol's gray matter control image has a signal-to-noise
 ratio of about 155 ([Chapter 6](./06-the-asl-signal.md)); the difference of two such
 images has $\sqrt{2}$ times the noise of one and a signal of 0.7 % of the control:
@@ -434,17 +449,25 @@ last column does to a CBF computed with the one-line formula, which is the stand
   transit time allows.
 - **The transit time sets the minimum delay.** Imaging before the label has arrived
   measures nothing; the safe delay depends on the population, which is why the white paper
-  recommends different delays for children, adults and the elderly ([Chapter 7](./07-acquisition-parameters.md)).
+  recommends different delays for children, adults and the elderly {cite:p}`alsop2015`
+  ([Chapter 7](./07-acquisition-parameters.md)).
 - **White matter is a harder measurement than gray matter**: a third of the flow, a later
   arrival and a shorter T1 leave it a fifth of the gray matter signal at the reference timing.
+  In vivo, 10 minutes of background-suppressed PCASL gave a significant signal in 70 % of
+  white matter voxels {cite:p}`vanosch2009`.
 - **$\lambda$, $T_{1b}$ and $\alpha$ are assumed, not measured**, and each multiplies the
-  CBF estimate directly. Record them and where they came from ([Chapter 16](../04-quantification/16-calibration.md)).
+  CBF estimate directly; the blood $T_1$, for one, varies with hematocrit
+  {cite:p}`lu2004,hales2016`. Record them and where they came from ([Chapter 16](../04-quantification/16-calibration.md)).
 
 ## Further reading
 
 The nitrous oxide method {cite:p}`kety1948`, the theory of inert-gas exchange behind the
 one-compartment model {cite:p}`kety1951`, and the partition coefficient of water
-{cite:p}`herscovitch1985`. Arterial water as a tracer: the proposal {cite:p}`detre1992` and
-its first demonstration {cite:p}`williams1992`; the blood T1 at 3 T {cite:p}`lu2004`; the
+{cite:p}`herscovitch1985`. Normal perfusion and its variation between people, with age and
+with sex {cite:p}`parkes2004`; whether ASL can detect white matter perfusion
+{cite:p}`vanosch2009`; transit times across the healthy brain
+{cite:p}`macintosh2010,dai2012`. Arterial water as a tracer: the proposal {cite:p}`detre1992` and
+its first demonstration {cite:p}`williams1992`; the blood T1 at 3 T {cite:p}`lu2004` and
+its dependence on hematocrit and oxygenation {cite:p}`hales2016`; the
 consensus recommendations that fix the constants used here {cite:p}`alsop2015`; and the
 general kinetic model the animation integrated, {cite:t}`buxton1998`.

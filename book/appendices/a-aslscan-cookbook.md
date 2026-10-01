@@ -24,7 +24,7 @@ cfg = cookbook.load_config()
 ## The simulator in one paragraph
 
 aslscan takes a BIDS ASL protocol and a phantom directory of NIfTI maps (perfusion, transit
-time, T1, T2, T2*, M0, tissue labels, optionally a field map) and writes a BIDS ASL dataset:
+time, T1, T2, T2*, M0, tissue labels, optionally a field map) and writes a BIDS ASL dataset {cite:p}`clement2022`:
 `part-mag` and `part-phase` images with one volume per `aslcontext.tsv` row, the sidecars,
 a separate M0 scan when `M0Type` is `Separate`, and the ground truth on the acquisition
 grid. The kinetics stage evaluates the general kinetic model {cite:p}`buxton1998` per phantom
@@ -33,7 +33,7 @@ compartments (saturation recovery or the background-suppression timeline for tis
 signed difference for blood); the acquisition stage, shared with the diffusion simulator
 TRXScan through the `mrsim-acq` library, acquires each slice as a 2D single-shot spin-echo
 EPI with T2 and T2' decay, field-map distortion, partial Fourier, ghosts, spikes, receive
-coils, GRAPPA, k-space noise, and head motion. It reproduces ASLDRO's kinetic and signal
+coils, GRAPPA {cite:p}`griswold2002`, k-space noise, and head motion. It reproduces ASLDRO's kinetic and signal
 models {cite:p}`olivertaylor2021`.
 
 ## Tools and phantoms
@@ -48,7 +48,7 @@ for key, ph in cfg["phantoms"].items():
           + ("; synthetic field map" if ph["fieldmap"] else ""))
 ```
 
-The source phantom is ASLDRO's `hrgt_icbm_2009a_nls_3t`, converted to the layout above by
+The source phantom is ASLDRO's `hrgt_icbm_2009a_nls_3t` {cite:p}`olivertaylor2021`, converted to the layout above by
 aslscan's `tools/hrgt_to_bids.py` and cropped by the pipeline to the 100 mm slab that 20
 slices of 5 mm tile exactly. The field map of `slab-fieldmap` is synthetic: a +120 Hz lobe
 above the frontal sinuses, −90 Hz lobes at the temporal bones, and a small linear term
@@ -263,5 +263,5 @@ cd pipelines
 micromamba run -n aslbook snakemake -c 4 <dataset-id>
 ```
 
-The Snakefile prepares the phantom slabs, runs the commands above, adds the tissue
+The Snakefile (the pipeline is a Snakemake workflow {cite:p}`molder2021`) prepares the phantom slabs, runs the commands above, adds the tissue
 fractions, and writes the provenance file. A run takes about eight seconds on the slab.

@@ -36,8 +36,8 @@ for name, (units, definition, chapters) in truth.TRUTH_MAPS.items():
 
 ## What the deltam truth is, exactly
 
-For every `label` (and `deltam`) row the simulator evaluates the general kinetic model in
-every 1 mm phantom voxel at that row's signal time plus the slice's readout offset, and
+For every `label` (and `deltam`) row the simulator evaluates the general kinetic model
+{cite:p}`buxton1998` in every 1 mm phantom voxel at that row's signal time plus the slice's readout offset, and
 box-averages the result onto the acquisition grid; `control` and `m0scan` rows hold zero. It
 is in the units of `M0map`, before the intensity scale, the T2 decay of blood at the echo
 time, and, under background suppression, the pulses' label factor. To compare it with a

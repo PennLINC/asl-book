@@ -3,7 +3,9 @@
 The tissue values are those of the ASLDRO ``hrgt_icbm_2009a_nls_3t`` phantom that aslscan
 simulates: one constant per tissue class, which is what makes the phantom's answer key exact
 and what makes the toy tier a per-class computation. The blood constants are the aslscan
-defaults, which are the values recommended by the ASL white paper (Alsop et al. 2015) at 3 T.
+defaults: the T1 of blood, the partition coefficient and the labeling efficiencies are the
+values the ASL white paper (Alsop et al. 2015) recommends at 3 T; the T2 of blood (165 ms) is
+the simulator's own default, not a white-paper value.
 The protocol constants are the book's reference PCASL acquisition, chosen to follow the white
 paper's 2D recommendations within what the simulator models. Seconds and mm unless the name
 says otherwise.

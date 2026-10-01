@@ -220,11 +220,12 @@ that a noise draw happens to favor.
 The transit time is a physiological quantity in its own right. It lengthens with age, with
 distance from the feeding arteries (the watershed regions between territories arrive last),
 in white matter, and wherever a stenosis or an occlusion forces blood through collateral
-routes; a region with a long ATT and normal CBF is a different clinical finding from a
+routes {cite:p}`alsop2015,woods2024`; a region with a long ATT and normal CBF is a different clinical finding from a
 region with a low CBF {cite:p}`macintosh2010,wang2003`. It also matters for the CBF map
-itself. In a single-delay acquisition a long transit time produces the **transit-delay
-artifact**: bright arterial signal where the label is still in the vessels and dark tissue
-downstream that the bolus has not reached, which a reader may take for hypoperfusion. A
+itself. In a single-delay acquisition a long transit time leaves its own pattern on the
+map: bright arterial signal where the label is still in the vessels and dark tissue
+downstream that the bolus has not reached, which a reader may take for hypoperfusion
+{cite:p}`alsop2015,woods2024`. A
 multi-delay fit assigns the late-arriving signal to a late ATT instead of to a low CBF, and
 reports both. What the book's model cannot show is the arterial signal itself: the phantom
 has no macrovascular compartment ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)),
@@ -234,7 +235,7 @@ multi-delay fits handle with an extra compartment {cite:p}`chappell2010` is abse
 ## See it: the multi-pld dataset
 
 The sidecar of a multi-delay series gives `PostLabelingDelay` as a list with one entry per
-volume; `quant.pld_of_pairs` reads the delay of each control-label pair from it, and the
+volume {cite:p}`clement2022`; `quant.pld_of_pairs` reads the delay of each control-label pair from it, and the
 pairs of each delay are averaged into one difference image per delay. The figure shows the
 six on the display slice, with the same window.
 
@@ -270,7 +271,8 @@ such points.
 
 The fit runs on every voxel with more than half of its volume perfused, with the tissue T1
 of each voxel taken from the pipeline's tissue fractions (a fraction-weighted mean of the
-gray and white matter values; a real pipeline would use a fixed 1.3 s or a T1 map), each
+gray and white matter values; a real pipeline would use one assumed value for every voxel,
+or a T1 map), each
 slice's readout offset, and the calibrated M0 scan.
 
 ```{code-cell} python
@@ -388,8 +390,9 @@ not fix it, an earlier first delay (or a 3D readout, which has no slice offsets)
 
 ## Borrowing strength from neighbors
 
-Multi-delay pipelines rarely fit voxels independently. BASIL's spatial prior
-{cite:p}`chappell2009` regularizes the parameters toward their neighbors, and simpler
+Multi-delay pipelines rarely fit voxels independently. BASIL's variational Bayesian fit
+{cite:p}`chappell2009` has a spatial prior that regularizes the parameters toward their
+neighbors {cite:p}`groves2009`, and simpler
 pipelines smooth the difference images before fitting. The cell does the simplest version,
 a Gaussian of one voxel within each slice, and refits.
 
@@ -494,13 +497,19 @@ The chapter's figures give the rules that {cite:t}`woods2024` set out in detail:
   single-delay one needs more time, and it is the ATT map and the freedom from the
   arrival assumption that pay for it.
 
+{cite:t}`mezue2014` is a worked example of such a design: a multi-delay PCASL protocol
+that was optimized and then tested for the reliability of its estimates at rest and
+during a task.
+
 Two designs measure CBF without the transit time at all. A long labeling and a long delay,
-the white paper's own recommendation (LD 1.8 s, PLD 1.8 s or more), put the readout after
+the white paper's own recommendation {cite:p}`alsop2015` (LD 1.8 s, PLD 1.8 s or more),
+put the readout after
 every arrival, at the cost of a decayed signal and the T1 bias of
 [Chapter 14](./14-cbf-quantification.md) {cite:p}`alsop1996`. Time-encoded (Hadamard)
 labeling ([Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md)) encodes several
 sub-boluses into one series and decodes a multi-delay curve from it with less noise per
-delay than acquiring the delays one by one {cite:p}`dai2013`; Look-Locker readouts sample
+delay than acquiring the delays one by one {cite:p}`gunther2007,dai2013,teeuwisse2014`;
+Look-Locker readouts sample
 the curve after a single label {cite:p}`gunther2001`, and the model-free approach of
 {cite:t}`petersen2006` deconvolves the measured arterial input instead of assuming the
 bolus shape.
@@ -521,7 +530,7 @@ reference dataset, with the same 30 pairs, gives 44 and 7 in the two tissues.
 
 - **Acquire several delays when the transit time is unknown or is the question**: elderly
   and cerebrovascular populations, watershed regions, anything where a single-delay map
-  might show a transit-delay artifact.
+  might show late arrival as low perfusion.
 - **Put the shortest delay before the earliest arrival in every slice**, and the longest
   after the latest; with a 2D readout account for the slice offsets when you do.
 - **Weight the averages toward the long delays**, where the signal is smallest.
@@ -534,6 +543,9 @@ reference dataset, with the same 30 pairs, gives 44 and 7 in the two tissues.
 The kinetic model and its multi-delay fit are {cite:t}`buxton1998`; the recommendations
 for multi-timepoint ASL are {cite:t}`woods2024`. Transit-time mapping and its physiology:
 {cite:t}`macintosh2010` and {cite:t}`wang2003`; the macrovascular component that this
-book's phantom lacks, {cite:t}`chappell2010`; the spatially regularized Bayesian fit,
-{cite:t}`chappell2009`. The arrival-insensitive designs: {cite:t}`alsop1996`,
-{cite:t}`dai2013`, {cite:t}`gunther2001`, and {cite:t}`petersen2006`.
+book's phantom lacks, {cite:t}`chappell2010`; the Bayesian fit,
+{cite:t}`chappell2009`, and its spatial prior, {cite:t}`groves2009`; a multi-delay
+protocol optimized and tested for reliability, {cite:t}`mezue2014`. The
+arrival-insensitive designs: {cite:t}`alsop1996`; time-encoded labeling,
+{cite:t}`gunther2007`, {cite:t}`dai2013`, and {cite:t}`teeuwisse2014`; the Look-Locker
+readout, {cite:t}`gunther2001`; and the model-free approach, {cite:t}`petersen2006`.

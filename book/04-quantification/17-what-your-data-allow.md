@@ -8,9 +8,9 @@ kernelspec:
 :::{admonition} Simulated datasets in this chapter
 :class: note
 - **Built in this page:** a small rules engine that reads an ASL sidecar and says which quantities the acquisition supports, applied to the book's protocols and to five public example sidecars ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
-- **`ref-pcasl`**: the reference series, quantified with and without its M0 scan ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
+- **`ref-pcasl`**: the reference series, quantified with and without its M0 scan, and calibrated with a constant tissue T1 and with its T1 map ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
 - **`bgsup`**: the `on` run, whose control images hold no static signal ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-bgsup)).
-- **`multi-pld`**: the six-delay series with its 2D readout, fitted with and without slice timing ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-multi-pld)).
+- **`multi-pld`**: the six-delay series with its 2D readout, fitted with and without slice timing, and with a constant tissue T1 and with its T1 map ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-multi-pld)).
 - **`pld-sweep`**: single-delay runs at 0.5 to 3.0 s, for the delay-versus-transit-time question ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-pld-sweep)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
@@ -22,6 +22,9 @@ After this chapter you can:
 
 - read an ASL sidecar and say which analyses it supports, which are marginal and why, and
   which are not possible
+- name the additional acquisitions (an M0 scan, a tissue T1 map, a phase-contrast flow
+  measurement, a hematocrit, a field map, an anatomical image) that replace an assumed
+  constant or step with a measurement, and say how much of the CBF each one moves
 - work through a dataset you did not design: calibrate without an M0 scan, fit transit
   times from a 2D multi-delay series, and judge a delay against a population's transit times
 - say what complex data add to ASL, and which sidecar fields a quantification needs
@@ -280,6 +283,284 @@ for header, p, att_range in COLUMNS:
         print(f"  {analysis:<32} {verdict:<9} {reason}")
 ```
 
+## Acquisitions that make the quantification better
+
+The decision table takes the ASL series as given. Most of what the quantification
+assumes can also be measured, with a scan or a blood sample of its own, and each
+measurement removes one sensitivity that an earlier chapter put a number on. The rules
+engine reads only the ASL sidecar, so it knows about two of these measurements (the M0
+image and the delays) and not the rest, which change how far a "yes" can be trusted
+rather than whether a quantity can be determined. They are listed here instead, with
+the constant or step each one replaces, its cost, and the chapter that measured what it
+removes.
+
+| Additional acquisition | What it replaces | Cost | What the book's data show |
+|---|---|---|---|
+| M0 scan: long TR, the ASL readout, no suppression | the mean control image as calibration, and most of its saturation correction | one or two volumes | the only calibration when the series is suppressed; at TR 8 s the saturation correction is 0.2 percent in gray matter, at TR 2 s 29 percent ([Chapter 16](./16-calibration.md#measure-it-cbf-from-each-route-uncorrected-and-corrected)) |
+| Tissue $T_1$ map | the one assumed tissue $T_1$ in $T_1'$, in the multi-delay fit, and in the saturation correction | one to several minutes | about 1 percent of fitted gray-matter CBF per 0.01 s of assumed $T_1$ ([Chapter 16](./16-calibration.md#measure-it-the-assumed-tissue-t1-in-a-multi-delay-fit)); the cells below |
+| Phase-contrast flow in the feeding arteries | the assumed labeling efficiency $\alpha$ | a short scan and an angiographic localizer | 5.6 to 6.2 percent of CBF per 0.05 of $\alpha$ ([Chapter 16](./16-calibration.md#measure-it-the-sensitivity-of-cbf-to-the-assumed-constants)) |
+| Hematocrit | the assumed $T_{1b}$ of 1.65 s | a blood sample, no scan time | 8 to 10 percent of CBF per 0.1 s of $T_{1b}$ ([Chapter 16](./16-calibration.md#measure-it-the-sensitivity-of-cbf-to-the-assumed-constants)) |
+| Field map, or a reversed phase-encode pair | the assumption that an ASL voxel lies where the anatomical image puts it | a few volumes | the per-voxel CBF error in the inferior slices doubles without the correction ([Chapter 11](../03-preprocessing/11-susceptibility-distortion.md#residual-error-versus-truth-cbf)) |
+| $T_1$-weighted anatomical image | the assumption that a voxel holds one tissue | a few minutes | "gray-matter CBF" runs from 53.6 to 60.0 with the mask threshold ([Chapter 12](../03-preprocessing/12-partial-volume.md#see-it-how-partial-volume-biases-what-a-study-reports)) |
+| Several delays, or time-encoded labeling | the assumption that the delay exceeds every transit time | a longer or re-divided ASL series | [Chapter 15](./15-multi-delay.md), [Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md), and worked cases 2 and 3 below |
+| $B_1$ map | the nominal flip angles of the labeling and suppression pulses | a short scan | the label factor of the suppression pulses ([Chapter 9](../03-preprocessing/09-background-suppression.md)) |
+
+### A tissue T1 map
+
+The tissue $T_1$ enters the quantification in three places. It sets $T_1'$, the rate at
+which the label decays once it is in tissue ([Chapter 5](../02-labeling/05-kinetic-model.md));
+a multi-delay fit therefore has to assume it ([Chapter 15](./15-multi-delay.md)); and the
+saturation correction of a calibration image uses it
+([Chapter 16](./16-calibration.md#what-the-formula-asks-for)). In all three the usual
+choice is one number for the whole brain, and the published values for gray matter at
+3 T themselves range from 1.33 s {cite:p}`wansapura1999`, which is the phantom's value,
+to 1.82 s {cite:p}`stanisz2005`, with white matter at 0.83 and 1.08 s in the same two
+studies. A quantitative $T_1$ map replaces the number with a measurement in every voxel.
+It can be an inversion-recovery series with the ASL readout, which takes a minute or two
+at the ASL resolution; a variable-flip-angle acquisition {cite:p}`deoni2003`; or an
+MP2RAGE-style acquisition {cite:p}`marques2010` at the resolution of the anatomical image,
+which takes several minutes. The first has two further uses. Its fit returns a per-voxel $M_0$ along with
+the $T_1$, measured with the ASL readout and already on the ASL grid. And tissue
+fractions estimated from a $T_1$ map on that grid {cite:p}`shin2010,petr2013,ahlgren2014`
+share the ASL images' resolution and distortion, so the partial volume estimates of
+[Chapter 12](../03-preprocessing/12-partial-volume.md) no longer depend on registering
+a segmented anatomical image to the ASL series.
+
+The phantom's `T1map` truth is the map such a scan would deliver without error: the
+volume-weighted mean $T_1$ of each acquisition voxel. The cell refits the `multi-pld`
+series with it in place of the gray-matter constant, twice: on the series' noise-free
+difference (the `deltam` truth), which isolates the model, and on the measured images.
+The scores are taken in the eight slices whose first sample precedes the gray-matter
+arrival (worked case 2 explains why), in pure gray matter, in pure white matter, and in
+the voxels that are at least half gray matter and at least a tenth CSF.
+
+```{code-cell} python
+:tags: [hide-input]
+mp_run = data.load_dataset("multi-pld").run()
+q = summarize(mp_run)
+pair_pld = quant.pld_of_pairs(q["p"], q["ctx"])
+dly = np.unique(pair_pld)
+per_delay = lambda d4: np.stack([d4[..., pair_pld == v].mean(-1) for v in dly], -1)
+label_rows = [i for i, row in enumerate(q["ctx"]) if row == "label"]
+m0_scan_mp = quant.m0_correction(mp_run.m0scan(), tr=mp_run.m0scan_sidecar()["RepetitionTimePreparation"])
+series = {"noise-free difference": (per_delay(mp_run.truth("deltam")[..., label_rows]), mp_run.truth("M0map")),   # both in M0 units
+          "measured series": (per_delay(quant.subtract(q["mag"], q["ctx"])), m0_scan_mp)}
+t1_truth = mp_run.truth("T1map")
+t1_choice = {"GM constant": GM.t1, "T1 map": np.where(t1_truth > 0, t1_truth, GM.t1)}
+inflow = ((dly[0] + q["offsets"]) < GM.att)[None, None, :]      # slices whose first sample precedes the GM arrival
+fit_mask = mp_run.mask() & (q["fr"]["gm"] + q["fr"]["wm"] >= 0.5)
+rois = {"GM": q["masks"]["GM"], "WM": q["masks"]["WM"], "GM next to CSF": (q["fr"]["gm"] >= 0.5) & (q["fr"]["csf"] >= 0.1)}
+rois = {name: roi & inflow & fit_mask for name, roi in rois.items()}
+truth_c, truth_a = mp_run.truth("perfusion"), mp_run.truth("att")
+
+bias = {}
+for s_name, (d, m0_) in series.items():
+    for t_name, t1 in t1_choice.items():
+        c, a = quant.fit_multi_pld(d, dly, m0_, mask=fit_mask, slice_offsets=q["offsets"], t1_tissue=t1)
+        for r_name, roi in rois.items():
+            bias[s_name, t_name, r_name] = (c[roi].mean() - truth_c[roi].mean(), a[roi].mean() - truth_a[roi].mean())
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.2), sharey=True)
+x = np.arange(len(rois))
+for ax, s_name in zip(axes, series):
+    for j, (t_name, color) in enumerate(zip(t1_choice, (PALETTE[7], PALETTE[0]))):
+        ax.bar(x + (j - 0.5) * 0.38, [bias[s_name, t_name, r][0] for r in rois], 0.36, color=color, label=t_name)
+    ax.axhline(0, color=INK["secondary"], lw=0.8)
+    ax.set_axisbelow(True)
+    ax.set_xticks(x, list(rois))
+    ax.set(title=s_name)
+axes[0].set(ylabel="fitted CBF − truth (ml/100 g/min)")
+axes[0].legend(loc="upper left", title="tissue T1 in the fit")
+fig.tight_layout()
+
+print(f"slices 0-{int(inflow.sum()) - 1}; voxels: " + ", ".join(f"{r} {int(roi.sum())} (mean of the T1 map {t1_truth[roi].mean():.2f} s, true CBF {truth_c[roi].mean():.1f})" for r, roi in rois.items()))
+for s_name in series:
+    for r in rois:
+        (c0, a0), (c1, a1) = bias[s_name, "GM constant", r], bias[s_name, "T1 map", r]
+        print(f"{s_name:<22} {r:<15} CBF bias {c0:+5.1f} -> {c1:+5.1f} ml/100 g/min ({c0 / truth_c[rois[r]].mean():+.0%} -> {c1 / truth_c[rois[r]].mean():+.0%}); ATT bias {a0:+.2f} -> {a1:+.2f} s   (GM constant -> T1 map)")
+```
+
+Each group of bars is one set of voxels; red is the fit with the gray-matter constant of
+1.33 s in every voxel, blue the fit with the $T_1$ map. Start with the noise-free panel,
+which shows what the assumption itself costs. In pure gray matter nothing changes (a CBF
+bias of +0.1 against +0.0 ml/100 g/min), because the constant is the phantom's
+gray-matter value; in a real brain it is a literature value, and the error is the 1
+percent per 0.01 s of [Chapter 16](./16-calibration.md#measure-it-the-assumed-tissue-t1-in-a-multi-delay-fit).
+In pure white matter, whose $T_1$ is 0.84 s in the map, the constant makes the model
+decay too slowly: the fit underestimates CBF by 6.8 ml/100 g/min, 33 percent, and places
+the arrival 0.21 s early, and the map removes both (+0.6 ml/100 g/min, −0.01 s). The
+third group goes the other way. In gray-matter voxels that contain CSF the map reads
+1.70 s on average, between the gray matter's 1.33 s and the CSF's 3 s, but the label is
+only in the gray matter and decays with its $T_1$. The constant is the better number
+there (+2.1 ml/100 g/min, 5 percent), and the map turns it into an underestimate of 6.5
+ml/100 g/min, 15 percent, with a transit time 0.26 s early. A $T_1$ map is the $T_1$ of the
+voxel, and the kinetic model wants the $T_1$ of the perfused tissue in it. The two agree
+in pure tissue and differ wherever CSF shares the voxel, so the map has to be combined
+with the tissue fractions: [Chapter 15](./15-multi-delay.md#see-it-the-multi-pld-dataset)
+fits with the fraction-weighted $T_1$ of the gray and white matter in each voxel, and a
+partial-volume-corrected fit gives each tissue its own {cite:p}`chappell2011`.
+
+The measured panel is the same comparison with the noise of five pairs per delay, and it
+reads differently. Gray matter carries the noise bias of
+[Chapter 15](./15-multi-delay.md), +6.7 ml/100 g/min with either $T_1$. In white matter
+the map does not help: the bias grows from +5.7 to +20.4 ml/100 g/min, because at the
+true, shorter $T_1$ the model expects less signal per unit of CBF, so the same noise is
+worth more CBF, and the fit cannot return a negative value to balance it. In the voxels
+next to CSF the bias falls from +10.2 to +0.1, which is two errors cancelling (the noise
+bias and the 15 percent of the left panel), not a correction. A measured $T_1$ removes
+the model's bias and nothing else: it pays off in a region-level fit or a spatially
+regularized one, where the noise bias is small, and in voxelwise white matter it trades
+an underestimate for the noise that the constant was hiding.
+
+The other use of the map is the saturation correction of the calibration image. Worked
+case 1 below calibrates the reference series on its mean control image, acquired at TR
+4.5 s, with `quant.m0_correction` and the gray-matter $T_1$. The cell repeats that with
+`t1=run.truth("T1map")`, for the control mean and for the separate M0 scan at TR 8 s,
+and scores each corrected image against the $M_0$ the formula asks for (the `M0map`
+truth in image units, with the blood's $T_2$ decay).
+
+```{code-cell} python
+:tags: [hide-input]
+ref_run = data.load_dataset("ref-pcasl").run()
+r = summarize(ref_run)
+t1_ref = np.where(ref_run.truth("T1map") > 0, ref_run.truth("T1map"), GM.t1)
+tr_ctrl, tr_scan = r["p"]["RepetitionTimePreparation"], ref_run.m0scan_sidecar()["RepetitionTimePreparation"]
+m0_wanted = R.signal_scale * ref_run.truth("M0map") * np.exp(-TE / presets.T2_BLOOD)   # the tissue M0 the formula asks for, in image units
+cbf_of = lambda m0_: quant.cbf_pcasl(r["dm"], m0_, r["plds"])
+routes = {"GM constant": (quant.m0_correction(r["ctrl"], tr=tr_ctrl), quant.m0_correction(ref_run.m0scan(), tr=tr_scan)),
+          "T1 map": (quant.m0_correction(r["ctrl"], tr=tr_ctrl, t1=t1_ref), quant.m0_correction(ref_run.m0scan(), tr=tr_scan, t1=t1_ref))}
+rois_ref = {"GM": r["masks"]["GM"], "WM": r["masks"]["WM"], "GM next to CSF": (r["fr"]["gm"] >= 0.5) & (r["fr"]["csf"] >= 0.1), "CSF": r["masks"]["CSF"]}
+brain = ref_run.mask()
+
+fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
+for ax, (t_name, (m_ctrl, m_scan)) in zip(axes, routes.items()):
+    im = show_slice(ax, np.where(brain, cbf_of(m_ctrl) - cbf_of(m_scan), np.nan), K, title=f"control − M0-scan route\nsaturation: {t_name}", kind="diff", vmin=-5, vmax=5)
+fig.colorbar(im, ax=axes[1], shrink=0.8, label="ml/100 g/min")
+fig.tight_layout()
+
+for t_name, (m_ctrl, m_scan) in routes.items():
+    print(f"saturation correction with the {t_name}:")
+    for name, roi in rois_ref.items():
+        print(f"  {name:<15} M0 from the control mean {m_ctrl[roi].mean() / m0_wanted[roi].mean() - 1:+6.1%}, from the M0 scan {m_scan[roi].mean() / m0_wanted[roi].mean() - 1:+6.1%} of the true M0;  "
+              f"CBF, control route − M0-scan route {cbf_of(m_ctrl)[roi].mean() - cbf_of(m_scan)[roi].mean():+.2f} ml/100 g/min (of {cbf_of(m_scan)[roi].mean():.1f})")
+```
+
+The maps are the CBF from the control-mean route minus the CBF from the M0-scan route
+on the display slice. With the gray-matter constant (left) the ring around the
+ventricles that worked case 1 describes is visible: next to CSF the control route reads
+1.10 ml/100 g/min higher (of 31.8), because CSF at TR 4.5 s is far from recovered and
+the constant under-corrects it. With the $T_1$ map (right) the ring is gone: the two
+routes differ by 0.09 ml/100 g/min next to CSF and by 0.02 in gray and in white matter
+(the few colored voxels at the edge of the brain are where the truth map averages
+tissue with the empty background). The map therefore does what a long TR does. It does
+not make either route exact. Against the true $M_0$ both are 1.1 percent high in gray
+matter with either correction, and with the map the control mean is 2.0 percent high
+next to CSF and 10.9 percent high in pure CSF, where with the constant it was 2.1 and
+10.1 percent low. The remaining error is the correction's second factor, which swaps
+the tissue's $T_2$ decay for the blood's and still uses gray matter's 80 ms where CSF
+has 300 ms and white matter 110 ms (hence the 3.4 percent that stays in white matter);
+with the constant, the saturation error had the opposite sign and hid it. The gain to
+the calibration is small, that 1.10 of 31.8 ml/100 g/min in the voxels next to CSF, and
+a long-TR M0 scan provides it without any map. The $T_1$ map earns its scan time
+in the kinetic model, not in the calibration.
+
+### The M0 scan, and the CSF reference
+
+The white paper asks for a separate proton-density image acquired with the ASL readout,
+a long repetition time, and no background suppression {cite:p}`alsop2015`. It replaces
+the mean control image as the calibration image and costs one or two volumes.
+[Chapter 16](./16-calibration.md#measure-it-cbf-from-each-route-uncorrected-and-corrected)
+measured what it buys. Without background suppression, nothing in gray matter: once
+each image is corrected for its own repetition time, every route gives 43.7 or 43.8
+ml/100 g/min, and worked case 1 below finds the same over the whole map. The scan
+matters for three other reasons. Under background suppression the control images hold no
+static signal and the M0 scan is the only calibration. At TR 8 s its saturation
+correction is 0.2 percent in gray matter, so it hardly depends on an assumed $T_1$,
+where the control mean at TR 4.5 s needs 3.5 percent and a TR 2 s scan 29 percent. And
+a TR of 8 s is long enough for CSF (0.93 recovered), which the CSF reference needs. That
+route {cite:p}`chalela2000` reads $M_0$ in pure CSF and scales it to blood, replacing
+the partition coefficient $\lambda$ with the water content of CSF relative to blood and
+with CSF's own $T_1$ and $T_2$; in the phantom it rests on the 142 voxels that are at
+least 90 percent CSF, and its result depends on a ratio the phantom does not reproduce
+([Chapter 16](./16-calibration.md#see-it-the-csf-reference)). {cite:t}`pinto2020`
+compare the voxelwise and the reference-region calibrations on the same data and list
+the post-processing choices that move each.
+
+### Labeling efficiency and the T1 of blood
+
+Two constants of the formula belong to the blood, and neither needs the ASL series to be
+measured. The labeling efficiency of PCASL, 0.85 by convention, depends in a given
+subject on the velocity of the blood and the field offset at the labeling plane
+{cite:p}`dai2008,zhao2017`. {cite:t}`aslan2010` measure it with a separate
+phase-contrast scan of the internal carotid and vertebral arteries: the velocity images
+give the total flow into the brain, the brain's mass (from the anatomical image)
+converts it to a whole-brain mean CBF, and the efficiency is the value that makes the
+whole-brain mean of the ASL map equal to it. The cost is the phase-contrast scan and an
+angiographic localizer to place it. The phantom has no arteries, so this is the one
+row of the table without a simulated measurement; its size is the sensitivity of
+[Chapter 16](./16-calibration.md#measure-it-the-sensitivity-of-cbf-to-the-assumed-constants),
+5.6 to 6.2 percent of CBF per 0.05 of $\alpha$, the same in every voxel of the map. Note
+what the measurement does: it sets the global scale of the ASL map from another
+modality, with that modality's errors, and leaves ASL the spatial distribution.
+
+The $T_1$ of arterial blood, 1.65 s at 3 T in the white paper, falls as the hematocrit
+rises: {cite:t}`lu2004` measured $1/T_{1b} = 0.52\,\mathrm{Hct} + 0.38\ \mathrm{s^{-1}}$,
+and {cite:t}`hales2016` give a model that also accounts for the oxygen saturation and
+the field strength. A hematocrit from a blood sample costs no scan time and replaces
+the constant with the subject's own value.
+[Chapter 16](./16-calibration.md#measure-it-the-sensitivity-of-cbf-to-the-assumed-constants)
+puts the stake at 8 to 10 percent of CBF per 0.1 s of $T_{1b}$: hematocrits of 0.35 and
+0.50 correspond to 1.78 and 1.56 s, and to a CBF 10.6 percent lower and 9.0 percent
+higher than the constant gives. The error is the same in every voxel, so it is
+invisible within a subject and matters when the groups being compared differ in
+hematocrit.
+
+### A field map and an anatomical image
+
+Neither of these enters the CBF formula; they decide which tissue a voxel's CBF is
+attributed to. A field map {cite:p}`jezzard1995` or a pair of volumes with reversed
+phase-encode polarity {cite:p}`andersson2003` costs a few volumes and lets the EPI
+series be unwarped. In the `sdc` dataset of
+[Chapter 11](../03-preprocessing/11-susceptibility-distortion.md#residual-error-versus-truth-cbf)
+the per-voxel error of gray-matter CBF in the six inferior slices is 24.9 ml/100 g/min
+without distortion, 50.7 with it, and 22.1 after the unwarp, while the regional mean
+moves only from 49.0 to 47.7: the values are right and in the wrong place, which a
+regional average hides and a voxelwise or atlas-based analysis does not.
+
+A $T_1$-weighted anatomical image, a few minutes of scan time, is what the ASL series is
+registered to, and its segmentation {cite:p}`zhang2001` gives the tissue fractions of
+every ASL voxel. Without them a "gray-matter CBF" is the mean of whatever the mask
+contains:
+[Chapter 12](../03-preprocessing/12-partial-volume.md#see-it-how-partial-volume-biases-what-a-study-reports)
+found a true mean of 53.6 ml/100 g/min in voxels at least half gray matter and 60.0 in
+voxels at least 99 percent, and a 19 percent drop in a simulated atrophy with no change
+in perfusion. With the fractions, partial volume correction by regression
+{cite:p}`asllani2008` returned 61.9 where the uncorrected mean was 54.6, and the Bayesian
+form of the correction fits the two tissues inside the kinetic model
+{cite:p}`chappell2011`. The two
+acquisitions depend on each other: fractions from an undistorted anatomical image
+applied to a distorted ASL series are fractions of the wrong voxels.
+
+### Transit time, and B1
+
+The last two rows of the table need little scan time of their own. The single-delay
+formula assumes that the bolus has arrived; several delays measure the transit time
+instead {cite:p}`woods2024`, at the price in CBF precision that
+[Chapter 15](./15-multi-delay.md#fitting-a-single-delay-and-the-comparison) counted,
+and time-encoded labeling recovers the delays from one series with less noise per delay
+than separate pairs have at the same scan time {cite:p}`dai2013`, a factor of
+$\sqrt{7}$ for the encoding of
+[Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md). Worked cases 2 and 3
+below take up what a multi-delay series needs in order to deliver the transit time, and
+what a single delay risks without it. A $B_1$ map is worth its short scan where the
+transmit field is in doubt at the labeling plane, where it changes $\alpha$
+{cite:p}`wu2007`, or over
+the imaging volume, where it changes the inversion efficiency of the suppression
+pulses: two pulses at 95 percent efficiency scale the label by 0.81
+([Chapter 9](../03-preprocessing/09-background-suppression.md)), a factor the
+quantification divides out and therefore has to know, and one that was measured for
+real pulses by {cite:t}`garcia2005`.
+
 ## Worked case 1: a single-delay PCASL series without an M0 scan
 
 The commonest inherited dataset: single-delay PCASL, one series, no `m0scan` file, and
@@ -434,8 +715,8 @@ readout has to be shorter, or 3D.
 ## Worked case 3: the delay against the population's transit times
 
 The white paper recommends a delay of 1.5 s for children, 1.8 s for healthy adults
-under 70, and 2.0 s for older adults and patients, tracking the transit times of each
-population. The phantom cannot age, but its two tissues stand in for two populations:
+under 70, and 2.0 s for older adults and patients {cite:p}`alsop2015`, tracking the transit times
+of each population. The phantom cannot age, but its two tissues stand in for two populations:
 gray matter arrives at 0.8 s and white matter at 1.2 s, so a delay that is comfortable
 for one can be short for the other. The `pld-sweep` dataset quantifies the same brain at
 six delays with the single-delay formula, corrected for slice timing.
@@ -508,7 +789,7 @@ Less than in diffusion imaging. The phase of an ASL volume is dominated by the f
 offset and the coil, both static between control and label, and the difference signal
 is a 1 percent change in magnitude, not in phase. Complex subtraction (subtracting
 control and label as complex numbers before taking the magnitude) removes the Rician
-floor in the lowest-signal voxels and lets the noise average without bias
+floor {cite:p}`gudbjartsson1995` in the lowest-signal voxels and lets the noise average without bias
 ([Chapter 8](../03-preprocessing/08-noise.md)); with background suppression, where the
 control's magnitude is near the noise floor, this is the case in which the phase matters.
 Saving the phase costs no scan time and doubles the storage, and every simulated series
@@ -572,6 +853,11 @@ series, cannot be quantified without guessing, and the rules engine says so.
 - **For an inherited series without M0:** if it was not suppressed, calibrate on the mean
   control image with the TR and TE corrections and say so; if it was suppressed, report
   relative CBF.
+- **For absolute values that will be compared across groups or sites, measure what the
+  formula assumes:** an M0 scan at a long TR, a hematocrit (20 percent of CBF between
+  0.35 and 0.50), a phase-contrast flow measurement for $\alpha$ (about 6 percent per
+  0.05), a reversed phase-encode pair, and an anatomical image. Add a tissue $T_1$ map when the
+  kinetic model is fitted, and use it with the tissue fractions.
 - **Record `SliceTiming`, `M0Type`, the bolus fields, and `LabelingEfficiency`.** They
   cost nothing and every verdict above reads them.
 
@@ -579,4 +865,13 @@ series, cannot be quantified without guessing, and the rules engine says so.
 
 The consensus recommendations for single-delay {cite:p}`alsop2015` and multi-delay
 {cite:p}`woods2024` ASL; the ASL-BIDS specification {cite:p}`clement2022`; and how two
-pipelines make these decisions automatically {cite:p}`adebimpe2022,mutsaerts2020`.
+pipelines make these decisions automatically {cite:p}`adebimpe2022,mutsaerts2020`. For
+the additional measurements: tissue relaxation times at 3 T
+{cite:p}`wansapura1999,stanisz2005` and variable-flip-angle $T_1$ mapping
+{cite:p}`deoni2003`; calibration and its pitfalls {cite:p}`pinto2020,chalela2000`; the
+phase-contrast measurement of labeling efficiency {cite:p}`aslan2010`; the $T_1$ of blood
+and its dependence on hematocrit {cite:p}`lu2004,hales2016`; distortion correction from
+a field map {cite:p}`jezzard1995` or a reversed-polarity pair {cite:p}`andersson2003`;
+segmentation {cite:p}`zhang2001` and partial volume correction
+{cite:p}`asllani2008,chappell2011`; time-encoded labeling {cite:p}`dai2013`; and the
+efficiency of background suppression pulses {cite:p}`garcia2005`.

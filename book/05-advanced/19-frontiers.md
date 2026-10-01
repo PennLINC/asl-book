@@ -78,7 +78,8 @@ $$
 the pulsed-label curve of [Chapter 5](../02-labeling/05-kinetic-model.md) with the transit
 time set to zero. A saturation module produces a difference of at most $M_{0\mathrm{b}}$
 where an inversion produces $2 M_{0\mathrm{b}}$, so its efficiency in this formula is at
-most 0.5, which velocity-selective *inversion* modules developed later recover.
+most 0.5, which velocity-selective *inversion* modules developed later recover
+{cite:p}`qin2016`.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -133,15 +134,15 @@ The pseudo-continuous labeling of [Chapter 4](../02-labeling/04-labeling-schemes
 every artery crossing its plane. Adding a gradient across the plane during the pulse train
 makes the inversion efficiency vary sinusoidally with position along that gradient, so that
 arteries at the maxima are labeled and arteries half a period away are left in the control
-state. Cycling through a few such patterns, left-right and anterior-posterior with
+state {cite:p}`wong2007`. Cycling through a few such patterns, left-right and anterior-posterior with
 different phases, gives each artery a distinct label-control signature across the cycles,
 and a linear decoding of the same kind as
-[Chapter 18](./18-time-encoded-and-look-locker.md), or a clustering of the signatures,
+[Chapter 18](./18-time-encoded-and-look-locker.md)
 assigns every voxel's perfusion to the artery that delivered it: a *territory map* of the
 carotid and vertebral supplies {cite:p}`vanosch2018`. Because every cycle labels about half
 of the arteries, the total perfusion image costs no more scan time than a conventional
 PCASL scan of the same length. Super-selective variants rotate the gradient during the
-train so that only one vessel of choice is labeled. The maps are used to see collateral
+train so that only one vessel of choice is labeled {cite:p}`helle2010`. The maps are used to see collateral
 flow after an occlusion, to plan and follow bypass surgery, and to attribute a perfusion
 deficit to its vessel.
 
@@ -185,9 +186,10 @@ The kinetic model assumes that labeled water leaves the capillaries the moment i
 and thereafter shares the tissue's relaxation. Water is not a freely diffusible tracer at
 the capillary wall on the time scale of ASL: its exchange from blood to tissue takes a
 few hundred milliseconds, so at the readout part of the label is still intravascular
-{cite:p}`stlawrence2000`. The echo time can tell the two apart. Label in blood decays
-with the blood's $T_2$ of 165 ms at 3 T; label that has entered gray matter decays with the
-tissue's 80 ms. The difference signal at several echo times is then a two-component decay
+{cite:p}`stlawrence2000,zhou2001,parkes2002`. The echo time can tell the two apart. Label in blood decays
+with the blood's $T_2$, 165 ms in this book's simulations (the measured value depends on
+oxygenation and hematocrit {cite:p}`zhao2007`); label that has entered gray matter decays
+with the tissue's, 80 ms in the phantom. The difference signal at several echo times is then a two-component decay
 whose composition is the fraction of label still in blood, and a multi-echo (multi-TE)
 ASL readout measures the exchange time from it {cite:p}`gregori2013`. The cell extends the
 kinetic model with a blood compartment that empties into the tissue with an exchange time
@@ -261,14 +263,15 @@ quantification. [Chapter 16](../04-quantification/16-calibration.md) assumed the
 the blood's $T_2$ at the echo time, which is also aslscan's assumption; at a late readout
 most of the label has exchanged, the difference signal at TE = 30 ms is 13 to 18 % smaller
 than that assumption predicts, and CBF is underestimated by the same amount. At the
-reference echo time of 12 ms the error is less than half of that. Water exchange is also a
-quantity of interest in itself, as a measure of blood-brain barrier permeability.
+reference echo time of 12 ms the error is less than half of that. The transfer of water from
+blood to tissue is also a quantity of interest in itself, and it is what the multi-TE
+measurement of {cite:t}`gregori2013` set out to map.
 
 ## 3D readouts
 
 The white paper recommends a segmented 3D readout with background suppression
 {cite:p}`alsop2015`, and the book's 2D EPI reference protocol is the simulator's limit, not
-the field's practice. Two 3D readouts are used. 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
+the field's practice. The recommendation names two 3D readouts. 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
 excites the whole slab, then follows a train of refocusing pulses, each spin echo carrying
 an EPI readout of one through-plane partition of k-space ($k_z$); a stack of spirals does
 the same with a spiral trajectory in each partition. Both read every voxel at the same
@@ -356,9 +359,9 @@ edges of the bolus are smeared by the time they reach the tissue. And before the
 reaches the capillaries it passes through arteries within the voxel, where it contributes
 a difference signal that has nothing to do with perfusion into that voxel. Both effects
 are largest at short delays, which is where a multi-delay or time-encoded acquisition
-samples. A common description {cite:p}`chappell2010` adds two things to the model: a
-dispersion kernel, here a gamma-variate, convolved with the delivery, and an arterial
-compartment with a blood volume fraction $a\mathrm{BV}$, whose label arrives at an earlier
+samples. A common description adds two things to the model: a
+dispersion kernel {cite:p}`hrabe2004,chappell2013`, here a gamma-variate, convolved with
+the delivery, and an arterial compartment {cite:p}`chappell2010` with a blood volume fraction $a\mathrm{BV}$, whose label arrives at an earlier
 arterial arrival time $\delta_\mathrm{a}$ and is never exchanged:
 
 $$
@@ -494,7 +497,7 @@ need one of the three.
 ## Learned denoising and quantification
 
 Neural networks trained on paired data now denoise ASL difference images, predict the CBF
-map of a full-length scan from a few pairs, and, in some work, quantify CBF and transit
+map of a full-length scan from a few pairs {cite:p}`kim2018`, and, in some work, quantify CBF and transit
 time directly from multi-delay or time-encoded series without an explicit kinetic model.
 The gains in apparent image quality are large, and the caveats are the same as for every
 learned method. The output is only as general as the training data, which for ASL is
@@ -508,7 +511,8 @@ test these methods, which is the closing topic.
 
 Every quantification chapter of this book ended with an estimate scored against the truth,
 and that was possible only because the data were simulated. Real ASL has no ground truth:
-positron emission tomography agrees with ASL within its own errors, and test-retest
+positron emission tomography with labeled water is the usual reference, and comparisons
+with it carry its own errors {cite:p}`ye2000pet,heijtel2014`, and test-retest
 reproducibility tests only agreement with oneself. A simulator that takes a BIDS protocol
 and a phantom through the kinetic model, the signal equations, and a k-space acquisition,
 and writes the answer it started from, lets a method be scored on the quantity it claims
@@ -554,9 +558,12 @@ phantom with spatially varying maps, which every function in `aslbook` already a
 ## Further reading
 
 The reviews of advanced ASL methods {cite:p}`vanosch2018,hernandezgarcia2019`;
-velocity-selective ASL {cite:p}`wong2006`; restricted water exchange and its $T_2$
-signature {cite:p}`stlawrence2000,gregori2013`; 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
-and the comparison of readouts {cite:p}`vidorreta2013`; the macrovascular model
-{cite:p}`chappell2010`; the multi-timepoint recommendations, which discuss dispersion and
+velocity-selective ASL {cite:p}`wong2006` and its inversion variant {cite:p}`qin2016`;
+vessel-encoded {cite:p}`wong2007` and super-selective {cite:p}`helle2010` labeling;
+restricted water exchange {cite:p}`stlawrence2000,zhou2001,parkes2002` and its $T_2$
+signature {cite:p}`gregori2013`; 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
+and the comparison of readouts {cite:p}`vidorreta2013`; models of dispersion
+{cite:p}`hrabe2004,chappell2013` and the macrovascular model {cite:p}`chappell2010`;
+deep learning applied to ASL {cite:p}`kim2018`; the multi-timepoint recommendations, which discuss dispersion and
 arterial signal in time-encoded data {cite:p}`woods2024`; and the phantom this book's
 simulations start from {cite:p}`olivertaylor2021`.

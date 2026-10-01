@@ -149,7 +149,7 @@ the correction step by step, **(e)** residual error vs. truth (ΔM and CBF error
 ### Chapter 8 — Thermal noise, averaging, and denoising
 Gaussian in k-space → Rician magnitude → the difference of two Rician images is nearly
 Gaussian at high SNR; noise in ΔM is √2 σ per pair; averaging; tSNR maps; outlier pairs;
-the non-central χ case with coils/GRAPPA; simple denoising (Gaussian smoothing, and the
+the multi-coil GRAPPA case (spatially varying, still Rician after the sensitivity-weighted combination); MP-PCA and a NORDIC-style complex variant; simple denoising (Gaussian smoothing, and the
 bias it introduces at tissue edges); the CBF map noise floor at 30 pairs. *Pipeline:*
 `noise-sweep`, `ref-clean`; CBF error vs number of pairs used.
 
@@ -167,8 +167,11 @@ approximation. *Toy:* the timeline figure, the optimization, the slice dependenc
 Rigid motion between volumes; why ASL is unusually sensitive (a 1 % signal difference vs a
 few-percent edge signal change from a 1 mm shift); pairs vs volumes; motion correction by
 registration (scipy-based rigid registration of magnitude volumes to the mean control, or
-the simulator's true poses replayed); outlier rejection of pairs (a SCORE-like rule on the
-difference series); the drift case. *Pipeline:* `motion` (random, drift, random-bgsup),
+the simulator's true poses replayed); outlier handling: a simple deviation rule, then SCORE
+(Dolui 2017: mean-GM-CBF outliers at 2.5 MAD, then removal of the volume most correlated
+with the mean map while the pooled within-tissue variance falls) and SCRUB (Dolui 2016:
+robust voxelwise reweighting with a tissue prior, run on the volumes SCORE kept), each
+implemented in the page and scored against truth; the drift case. *Pipeline:* `motion` (random, drift, random-bgsup),
 ground-truth poses from `desc-motion_gt.tsv`: score the estimated poses and the ΔM/CBF
 error before and after correction and rejection.
 

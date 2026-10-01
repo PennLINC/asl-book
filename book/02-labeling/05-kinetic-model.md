@@ -74,7 +74,7 @@ The factor $2 M_{0b} f$ in front says that a fully inverted bolus differs from c
 the blood's equilibrium magnetization per unit volume, $M_{0b} = M_0/\lambda$, delivered at the
 rate $f$; the labeling efficiency $\alpha$ scales the delivery function. The symbols follow the
 [notation page](../00-frontmatter/notation.md): $f$ is CBF, $\lambda$ the blood-brain
-partition coefficient (0.9 ml/g), $\tau$ the labeling (bolus) duration, $w$ the post-labeling
+partition coefficient (0.9 ml/g, {cite:p}`herscovitch1985`), $\tau$ the labeling (bolus) duration, $w$ the post-labeling
 delay, and $\delta$ the transit time.
 
 Clearance and relaxation act on the same water at the same time, so their product is a single
@@ -100,8 +100,8 @@ for name in ("GM", "WM"):
 Gray matter's $T_1'$ is 1.311 s against a $T_1$ of 1.33 s, 1.5 % shorter; white matter's is
 0.3 % shorter. At the perfusion rates of the brain the clearance term is a small correction,
 and the reason it appears in every formula is completeness, not size. The difference between
-$T_1'$ and the *blood* $T_1$ (1.65 s) is another matter, and the last part of this chapter
-measures what it costs.
+$T_1'$ and the *blood* $T_1$ (1.65 s at 3 T, {cite:p}`lu2004`) is another matter, and the
+last part of this chapter measures what it costs.
 
 ## The three phases and the (P)CASL solution
 
@@ -139,7 +139,8 @@ $$
 
 with $q_p(t)$ a correction factor close to one that accounts for the difference between
 $T_{1b}$ and $T_1'$; its full form is in the dropdown. The PASL $\tau$ is the bolus duration
-fixed by the QUIPSS II or Q2TIPS cut-off ([Chapter 4](./04-labeling-schemes.md)), and the
+fixed by the QUIPSS II or Q2TIPS cut-off {cite:p}`wong1998,luh1999`
+([Chapter 4](./04-labeling-schemes.md)), and the
 clock $t$ starts at the labeling pulse, so $t$ is the inversion time TI.
 
 :::{dropdown} The PASL correction factor
@@ -160,7 +161,9 @@ its guarded divisions, so every curve on this page is the curve the pipeline use
 
 The figure evaluates the PCASL solution with the phantom's constants for pure gray matter
 (f 60 ml/100 g/min, ATT 0.8 s, T1 1.33 s) and pure white matter (f 20, ATT 1.2 s, T1 0.83 s),
-for the reference labeling duration of 1.8 s. The vertical axis is $\Delta M$ as a percentage
+for the reference labeling duration of 1.8 s. The phantom's tissue $T_1$ values are those
+measured at 3 T by {cite:t}`wansapura1999`, the short end of the published range;
+{cite:t}`stanisz2005` report 1.82 s and 1.08 s in excised tissue. The vertical axis is $\Delta M$ as a percentage
 of the tissue's $M_0$, the natural unit of the answer key. The shading marks the three phases
 for gray matter, and the dotted line is the reference readout time, $\tau + w$ = 3.6 s, at
 which the first slice of every reference-protocol image is read.
@@ -238,8 +241,9 @@ fig.tight_layout()
   slow-flow territories ([Chapter 14](../04-quantification/14-cbf-quantification.md)).
 - **Labeling duration** sets how long the curve keeps rising: 3.0 s raises the peak by a
   third over 1.8 s at the price of a longer TR; 0.7 s gives less than half the signal.
-- **Blood T1** scales the transit loss and, for PASL, the whole decay; it is the main reason
-  ASL works better at 3 T ([Chapter 7](./07-acquisition-parameters.md)).
+- **Blood T1** scales the transit loss and, for PASL, the whole decay; its lengthening with
+  field strength is one of the two reasons ASL works better at 3 T {cite:p}`alsop2015`
+  ([Chapter 7](./07-acquisition-parameters.md)).
 - **CBF** scales the curve almost linearly, which is what makes quantification possible; the
   "almost" is the weak dependence of $T_1'$ on $f$.
 
@@ -355,7 +359,8 @@ SNR falls as $e^{-w/T_1'}$ with every second of caution
 ## The multi-delay view
 
 A multi-delay acquisition samples the curve at several post-labeling delays and fits both
-$f$ and $\delta$ to it ([Chapter 15](../04-quantification/15-multi-delay.md)). The
+$f$ and $\delta$ to it {cite:p}`mezue2014,woods2024`
+([Chapter 15](../04-quantification/15-multi-delay.md)). The
 `pld-sweep` dataset does this with whole acquisitions: six single-delay PCASL series on the
 same slab at delays of 0.5 to 3.0 s in steps of 0.5 s, 15 pairs each, TR 6 s so that the
 longest delay fits. In a 2D readout each slice has its own readout time,
@@ -366,7 +371,9 @@ The figure compares, in pure gray matter (voxels more than 90 % GM) and pure whi
 the measured mean control-label difference at each delay (±2 standard errors over pairs),
 the model curve for the pure tissue at the region's slice times scaled from $M_0$ units to
 image units by $100 \times e^{-\mathrm{TE}/T_{2b}}$ (the simulator's intensity scale and
-the blood's $T_2$ decay at TE 12 ms), and the `deltam` ground truth of the same voxels.
+the blood's $T_2$ decay at TE 12 ms, with the simulator's blood $T_2$ of 165 ms; the
+measured value depends on oxygenation and hematocrit, {cite:p}`zhao2007`), and the `deltam`
+ground truth of the same voxels.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -537,7 +544,7 @@ single-delay maps of this phantom. Real tissue is kinder than the model: water s
 time in the capillaries before exchanging, still decaying with $T_{1b}$
 {cite:p}`stlawrence2000`, so the true error lies between zero and the model's figure. The
 white paper chose $T_{1b}$ knowingly, as the assumption wrong by the least when the
-exchange time is unknown.
+exchange time is unknown {cite:p}`alsop2015`.
 
 ## What the model leaves out
 
@@ -551,14 +558,15 @@ omits matter in real data:
   {cite:p}`hrabe2004,chappell2013`; the simulator does not.
 - **Macrovascular signal.** Label still in an artery at readout is counted as if it had
   perfused the voxel, a large bright spurious signal at delays below the transit time.
-  Vascular crushing or a longer delay removes it; the simulator has no arterial compartment,
-  so its `pld05` run is cleaner than a real one.
+  Vascular crushing or a longer delay removes it, and a multi-delay fit can model it as a
+  separate arterial component {cite:p}`chappell2010`; the simulator has no arterial
+  compartment, so its `pld05` run is cleaner than a real one.
 - **Restricted exchange.** Water crosses the capillary wall in a finite time, and meanwhile
   the label decays with $T_{1b}$, not $T_1'$ {cite:p}`stlawrence2000,zhou2001,parkes2002`; multi-echo ASL
   ([Chapter 19](../05-advanced/19-frontiers.md)) can measure the exchange time because the
-  two compartments also differ in $T_2$.
+  two compartments also differ in $T_2$ {cite:p}`gregori2013`.
 - **One T1 per tissue.** $T_{1b}$ varies by about 10 % between subjects with hematocrit and
-  oxygenation, which enters CBF as an equal error ([Chapter 16](../04-quantification/16-calibration.md)).
+  oxygenation {cite:p}`lu2004,hales2016`, which enters CBF as an equal error ([Chapter 16](../04-quantification/16-calibration.md)).
 
 ## What this implies for acquisition
 
@@ -582,6 +590,9 @@ omits matter in real data:
 
 The general kinetic model {cite:p}`buxton1998`; the transit-time-insensitive single-delay
 scheme {cite:p}`alsop1996` and its recommendation in the white paper {cite:p}`alsop2015`;
-exchange between capillary and tissue {cite:p}`stlawrence2000,zhou2001,parkes2002`; the
+exchange between capillary and tissue {cite:p}`stlawrence2000,zhou2001,parkes2002` and
+its measurement through $T_2$ {cite:p}`gregori2013`; the
 pulsed bolus and its cut-off {cite:p}`wong1998,luh1999`; multi-delay modeling of transit
-time and dispersion {cite:p}`chappell2010,hrabe2004,chappell2013,woods2024`.
+time and dispersion {cite:p}`chappell2010,hrabe2004,chappell2013,woods2024`; the constants
+the model needs, the partition coefficient {cite:p}`herscovitch1985`, the blood $T_1$
+{cite:p}`lu2004,hales2016` and the tissue $T_1$ {cite:p}`wansapura1999,stanisz2005`.

@@ -83,7 +83,8 @@ datasets:
     description: >-
       the reference protocol at three noise levels (sigma 10, 40, 80 in image units, i.e. gray
       matter SNR about 600, 150, 75), plus one run with eight receive coils and GRAPPA 2, whose
-      magnitude noise is non-central chi rather than Rician
+      noise is spatially varying (the coils are combined by sensitivity weighting, so the
+      magnitude noise stays Rician, with a level that depends on position)
     chapters: [8]
     protocol: { n_pairs: 30 }
     sweep: { key: overlay.acquisition.noise_variance, values: [100, 1600, 6400], labels: [sigma10, sigma40, sigma80] }

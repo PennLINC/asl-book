@@ -49,7 +49,8 @@ SIGMA = 40.0  # the reference protocol's noise, image units
 separate control-label pairs at each post-labeling delay. That divides the scan time: with
 seven delays, each delay receives one seventh of the pairs, and the difference image at
 each delay is √7 noisier than the single-delay image the same scan time would have bought.
-Time-encoded ASL removes the division {cite:p}`dai2013,woods2024`. The labeling period is
+Time-encoded ASL removes the division
+{cite:p}`gunther2007,dai2013,teeuwisse2014,woods2024`. The labeling period is
 cut into sub-boli, each sub-bolus is switched between label and control according to a row
 of a Hadamard matrix, and every acquired volume carries information about every delay. A
 linear decoding of the series recovers the signal of each sub-bolus separately, and, as the
@@ -78,7 +79,7 @@ S_i = M_\mathrm{s} - \sum_{j=1}^{N-1} L_{ij}\, \Delta M_j + n_i ,
 $$
 
 with $M_\mathrm{s}$ the static tissue signal and $n_i$ the noise. The sub-boli add because
-the kinetic model is linear in the delivered label: the difference from a bolus labeled
+the kinetic model {cite:p}`buxton1998` is linear in the delivered label: the difference from a bolus labeled
 during $[a, b]$ is the integral of the delivery over that interval, and integrals over
 adjacent intervals add. Decoding is a weighted sum over the volumes with the matrix's own
 column:
@@ -441,9 +442,9 @@ an RMSE of 0.88 s, no better than its white matter: at this scan time it measure
 Two remarks on design. Equal sub-boli are the simplest choice, not the best: because the
 earliest sub-boli decay longest, designs that lengthen them (T1-adjusted durations) equalize
 the decoded SNR across delays, and "free-lunch" designs make the first block long enough to
-serve as a single-delay measurement on its own {cite:p}`woods2024`. And at the shortest
-delays the decoded signal contains labeled blood still in arteries, which the kinetic model
-does not describe; [Chapter 19](./19-frontiers.md) shows what that does to a fit.
+serve as a single-delay measurement on its own {cite:p}`teeuwisse2014,woods2024`. And at
+the shortest delays the decoded signal contains labeled blood still in arteries
+{cite:p}`chappell2010`, which the kinetic model does not describe; [Chapter 19](./19-frontiers.md) shows what that does to a fit.
 
 ## Look-Locker readouts
 
@@ -469,7 +470,7 @@ with $n(t', t_k)$ the number of readouts in $(t', t_k)$ and $c(t')$ the arterial
 concentration of [Chapter 5](../02-labeling/05-kinetic-model.md). With $\theta = 0$ the
 integral is `kinetic.delta_m`, which the cell checks. The signal actually read is
 $\sin\theta \cdot \Delta M_\mathrm{LL}$; the figure divides by $\sin\theta$ to show the
-longitudinal label the train has left. The train here is a pulsed (FAIR) label with a
+longitudinal label the train has left. The train here is a pulsed (FAIR) label {cite:p}`kim1995` with a
 0.7 s bolus cut-off, [Chapter 4](../02-labeling/04-labeling-schemes.md), followed by ten
 readouts every 0.3 s from 0.3 to 3.0 s.
 
@@ -604,7 +605,7 @@ yet experienced. The exact discrete model returns 60.0 and 0.80 s at every angle
 price of a model that depends on the train's timing. The figure shows the trade behind the choice of $\theta$: a higher flip angle reads
 more signal at the first readout after arrival ($\sin\theta$, right panel) but leaves less
 for the later ones (left), and the sum over the train is what sets the SNR of the fitted
-curve. Flip angles of 25 to 35° are typical. The gain of the method is that ten samples of
+curve. The gain of the method is that ten samples of
 the curve come from one label, at $\sin\theta$ of the signal each, instead of ten labels;
 its cost is the flip-angle dependence of the curve, and, in 2D, the slice-by-slice timing
 of every readout in the train.
@@ -614,7 +615,7 @@ quantification model-free. The train is acquired twice, once with vascular crush
 gradients that dephase the labeled blood still moving in arteries and once without. The
 difference between the two trains is the arterial signal in the voxel, which is the local
 arterial input function, and the crushed train is the tissue response. Deconvolving the
-one from the other, as dynamic susceptibility contrast perfusion imaging does, gives CBF
+one from the other, as dynamic susceptibility contrast perfusion imaging does {cite:p}`ostergaard1996`, gives CBF
 without assuming a transit time, a bolus shape, or a tissue $T_1$; the sequence also
 acquires the train at a second flip angle so that the tissue $T_1$ and the flip-angle
 effect can be measured rather than assumed. Its price is scan time and a low SNR per
@@ -640,8 +641,10 @@ delays is arterial.
 
 ## Further reading
 
-Hadamard-encoded CASL {cite:p}`dai2013` and the consensus recommendations for
-multi-timepoint ASL, which cover time-encoded designs and their quantification
-{cite:p}`woods2024`; the Look-Locker sampling strategy for ASL {cite:p}`gunther2001` and
+Time-encoded labeling as first proposed {cite:p}`gunther2007`, Hadamard-encoded CASL
+{cite:p}`dai2013`, the timing strategies of time-encoded PCASL {cite:p}`teeuwisse2014`,
+and the consensus recommendations for multi-timepoint ASL, which cover time-encoded
+designs and their quantification {cite:p}`woods2024`; the macrovascular signal at short
+delays {cite:p}`chappell2010`; the Look-Locker sampling strategy for ASL {cite:p}`gunther2001` and
 QUASAR {cite:p}`petersen2006`; the kinetic model every sub-bolus obeys {cite:p}`buxton1998`;
 and the reviews of advanced ASL methods {cite:p}`vanosch2018,hernandezgarcia2019`.

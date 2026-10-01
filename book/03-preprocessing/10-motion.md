@@ -7,7 +7,7 @@ kernelspec:
 
 :::{admonition} Simulated datasets in this chapter
 :class: note
-- **Built in this page:** the true poses replayed on the reference series, and a rigid registration and an outlier rule written in the page ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **Built in this page:** the true poses replayed on the reference series, a rigid registration, an outlier rule, the SCORE algorithm, and a simplified SCRUB written in the page ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`motion`**: the reference series with random head jumps on six volumes (`random`), with a slow linear drift over the whole series (`drift`), and the jumps again under background suppression (`random-bgsup`), each with the true pose of every volume ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-motion)).
 - **`ref-pcasl`**: the same series without motion, simulated with the same seed, so that it is the motion-free version of `random` volume for volume ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
 
@@ -20,7 +20,8 @@ After this chapter you can:
 
 - explain why a millimeter of head motion, harmless in most MRI, corrupts an ASL difference image
 - distinguish motion between the two volumes of a pair from motion between pairs, and say what each does to the mean perfusion image
-- register the volumes of an ASL series rigidly, check the poses against the truth, see what registration leaves behind, and reject corrupted pairs with an outlier rule that knows when it cannot help
+- register the volumes of an ASL series rigidly, check the poses against the truth, and see what registration leaves behind
+- state the two passes of the SCORE algorithm, run it on a CBF time series, and explain how SCRUB down-weights corrupted voxels instead of discarding volumes, what its structural prior adds, and why neither helps against slow drift
 - choose acquisition settings that reduce the damage at the source
 
 ```{code-cell} python
@@ -262,11 +263,13 @@ should not set the score, and the registration below samples only the interior s
 
 A pipeline does not know which volumes moved, so it registers every volume to a reference:
 it searches for the six pose parameters whose undoing makes the volume most similar to the
-reference, then resamples the volume with them. FSL's MCFLIRT {cite:p}`jenkinson2002` and
-SPM's realign are the tools most ASL pipelines use {cite:p}`adebimpe2022,mutsaerts2020`.
+reference, then resamples the volume with them. MCFLIRT {cite:p}`jenkinson2002`, part of
+FSL {cite:p}`smith2004`, and SPM's realign {cite:p}`friston1995` are the tools most ASL
+pipelines use {cite:p}`adebimpe2022,mutsaerts2020`.
 The version in the setup cell is small enough to read in full: the reference is the mean
 control image, both images are smoothed by about a voxel, the similarity is the mean
-squared difference at 6000 brain voxels, and Powell's method searches from the identity.
+squared difference at 6000 brain voxels, and Powell's method {cite:p}`powell1964` searches
+from the identity.
 The smoothing matters more than it looks: resampling a noisy volume also averages its
 noise, so without it the search prefers a shift of half a voxel, where the noise is
 averaged most, to the true shift.
@@ -343,13 +346,15 @@ corrupted pairs, and the way to deal with them is to leave them out.
 ## Correction step by step: rejecting pairs
 
 Outlier rejection treats the thirty difference images as thirty measurements of the same
-map and discards the ones that disagree with the rest. The SCORE algorithm
-{cite:p}`dolui2017` first discards volumes whose mean CBF is far from the median, then
-iteratively removes the volume whose removal most improves the correlation of the mean map
-with the tissue maps. The rule here is a simplified first step: compute each pair's RMS
-deviation from the current mean, express it as a robust $z$-score (distance from the median
-in units of the median absolute deviation, which the outliers cannot inflate), discard the
-worst pair if its $z$ exceeds 2.5, recompute the mean, and repeat until nothing does.
+map and discards the ones that disagree with the rest. An early filter of this kind
+summarizes every difference volume by its mean and its standard deviation and drops the
+volumes in which either is far from the rest of the series {cite:p}`tan2009`. The rule in
+the next cell is written for this page in the same spirit, and it is the baseline for the
+two published algorithms that follow: compute each pair's RMS deviation from the current
+mean, express it as a robust $z$-score (distance from the median in units of the median
+absolute deviation, MAD, scaled by 1.4826 to estimate a standard deviation that the
+outliers cannot inflate), discard the worst pair if its $z$ exceeds 2.5, recompute the
+mean, and repeat until nothing does.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -388,10 +393,39 @@ was for. The arch in the drift panel is not motion: the volumes at the two ends 
 were resampled by nearly half a voxel, which averages their noise, while the middle
 volumes, already near the mean position, were barely resampled and keep their full noise.
 
-## Residual error versus truth
+## Correction step by step: SCORE
 
-The two corrections in every combination, scored on the mean difference image and on the CBF
-computed from it with the run's own M0 scan ([Chapter 14](../04-quantification/14-cbf-quantification.md)) against the unmoved truth; the motion-free reference sets the noise floor.
+The page's rule compares images with images. SCORE (structural correlation-based outlier
+rejection) {cite:p}`dolui2017`, the algorithm ASLPrep offers for this step
+{cite:p}`adebimpe2022`, also uses the anatomy. It works on the CBF time series, one CBF map
+per pair, and on masks of gray matter, white matter, and cerebrospinal fluid from the
+structural image, in two passes:
+
+1. **Pass 1, the gray matter mean.** Compute the mean gray matter CBF of every volume and
+   discard the volumes that lie more than 2.5 MAD (scaled to a standard deviation) from the
+   median of those means.
+2. **Pass 2, the structural correlation.** Average the remaining volumes and compute the
+   pooled within-tissue variance of that mean map, $V$: the variance of the map within gray
+   matter, within white matter, and within cerebrospinal fluid, each weighted by its number
+   of voxels. Correlate every remaining volume with the mean map, remove the volume with the
+   *highest* correlation, and recompute the mean map and $V$. Repeat while $V$ decreases;
+   the first removal that fails to lower $V$ is undone, and the algorithm stops.
+
+Pass 1 assumes that the mean perfusion of gray matter does not change during the scan.
+Pass 2 assumes that perfusion varies little within a tissue, so that a clean mean map has
+a low within-tissue variance and whatever raises that variance is artifact.
+The direction of the correlation test is the counterintuitive part. A volume with a large
+artifact imprints its pattern on the mean map, so the mean map resembles that volume more
+than it resembles any clean one; a clean volume resembles the mean only through the
+perfusion contrast, which in a single pair is buried in noise. The most correlated volume
+is therefore the suspect, and $V$ decides whether removing it helped.
+
+The cell implements both passes as published. The page's own choices are the inputs: each
+pair's difference image is converted to CBF with the run's M0 scan
+([Chapter 14](../04-quantification/14-cbf-quantification.md)), the three masks are the
+voxels with at least 0.9 of one tissue in the simulator's true fractions (a pipeline
+thresholds the probability maps of a segmentation), restricted to the interior slices, and
+$V$ is divided by the number of voxels so that it reads in (ml/100 g/min)².
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -399,26 +433,286 @@ p = ref.sidecar()
 plds = quant.slice_plds(p["PostLabelingDelay"], p["SliceTiming"])[None, None, :]
 truth_cbf = ref.truth("perfusion")
 cbf_of = lambda run, dm: quant.cbf_pcasl(dm, run.m0scan().astype(float), plds, tau=p["LabelingDuration"])
+fr = ref.fractions()
+tissue = {t: (fr[t] >= 0.9) & inner for t in ("gm", "wm", "csf")}        # SCORE's three tissue masks
+in_tissue = tissue["gm"] | tissue["wm"] | tissue["csf"]
+n_vox = {t: int(m.sum()) for t, m in tissue.items()}
+
+def structural_variance(m):
+    """Pooled variance of a CBF map within gray matter, white matter, and cerebrospinal fluid."""
+    return sum((n_vox[t] - 1) * m[tissue[t]].var(ddof=1) for t in tissue) / (sum(n_vox.values()) - 3)
+
+def correlation_with_mean(c, keep):
+    m = c[..., keep].mean(-1)[in_tissue]
+    return np.array([np.corrcoef(m, c[..., k][in_tissue])[0, 1] if keep[k] else np.nan for k in range(c.shape[-1])])
+
+def score(c, n_mad=2.5):
+    """SCORE on a CBF series c (x, y, z, pairs): the kept pairs, the pairs each pass removed,
+    V after each accepted removal, and the pair and V of the removal that was undone."""
+    g = c[tissue["gm"]].mean(0)                                           # pass 1: mean gray matter CBF of every pair
+    keep = np.abs(g - np.median(g)) <= n_mad * 1.4826 * np.median(np.abs(g - np.median(g)))
+    first, second, V = np.flatnonzero(~keep).tolist(), [], [structural_variance(c[..., keep].mean(-1))]
+    while True:                                                           # pass 2
+        k = int(np.nanargmax(correlation_with_mean(c, keep)))             # the pair most correlated with the current mean map
+        trial = keep.copy(); trial[k] = False
+        v = structural_variance(c[..., trial].mean(-1))
+        if v >= V[-1]:
+            return keep, first, second, V, (k, v)
+        keep = trial; second.append(k); V.append(v)
+
+series = {"random, uncorrected": ("random", d_rand), "random, registered": ("random", d_reg["random"]),
+          "drift, uncorrected": ("drift", d_raw["drift"]), "drift, registered": ("drift", d_reg["drift"]), "reference, no motion": (None, d_ref)}
+cbf_ts = {name: np.stack([cbf_of(runs[r] if r else ref, d[..., k]) for k in range(30)], -1) for name, (r, d) in series.items()}
+flags["reference, no motion"] = reject_pairs(d_ref)[0]
+print(f"tissue masks: {n_vox['gm']} gray matter, {n_vox['wm']} white matter, {n_vox['csf']} CSF voxels; pairs with a moved volume: {moved_pairs}")
+score_keep = {}
+for name, c in cbf_ts.items():
+    score_keep[name], first, second, V, (k_stop, v_stop) = score(c)
+    print(f"{name:>22}: pass 1 rejects {first}, pass 2 rejects {second} (V {V[0]:.0f}, removing pair {k_stop} would make it {v_stop:.0f}); "
+          f"the page's rule rejects {np.flatnonzero(~flags[name]).tolist()}")
+```
+
+```{code-cell} python
+:tags: [hide-input]
+c = cbf_ts["random, uncorrected"]
+g = c[tissue["gm"]].mean(0)
+med, sd = np.median(g), 1.4826 * np.median(np.abs(g - np.median(g)))
+print(f"random, uncorrected, pass 1: median of the gray matter means {med:.1f}, robust SD {sd:.1f} ml/100 g/min; moved pairs: "
+      + ", ".join(f"pair {k} {g[k]:.0f} (z {(g[k] - med) / sd:+.0f})" for k in moved_pairs))
+gz = (cbf_ts["reference, no motion"][tissue["gm"]].mean(0) - np.median(cbf_ts["reference, no motion"][tissue["gm"]].mean(0)))
+print(f"reference, pass 1: pair 13 has z {gz[13] / (1.4826 * np.median(np.abs(gz))):+.1f}; 30 Gaussian values put {30 * 0.0124:.1f} beyond 2.5 SD on average")
+r0 = correlation_with_mean(c, np.ones(30, bool))
+_, _, order, V, (k_stop, v_stop) = score(c, n_mad=np.inf)                 # pass 2 alone: no pair removed by pass 1
+print(f"pass 2 alone: correlation with the mean of all 30, still pairs {np.delete(r0, moved_pairs).mean():.2f}, moved pairs "
+      + ", ".join(f"{k}: {r0[k]:.2f}" for k in moved_pairs))
+print(f"pass 2 alone removes pairs {order} in that order; V = " + " -> ".join(f"{v:.0f}" for v in V) + f"; removing pair {k_stop} next would raise it to {v_stop:.0f}")
+_, _, order_reg, V_reg, (k_reg, v_reg) = score(cbf_ts["random, registered"], n_mad=np.inf)
+print(f"pass 2 alone on the registered series removes {order_reg}; V = " + " -> ".join(f"{v:.0f}" for v in V_reg) + f"; removing pair {k_reg} next would raise it to {v_reg:.0f}")
+colors = [PALETTE[1] if k in moved_pairs else PALETTE[0] for k in range(30)]
+fig, axes = plt.subplots(1, 3, figsize=(12, 3.3))
+axes[0].axhspan(med - 2.5 * sd, med + 2.5 * sd, color=PALETTE[0], alpha=0.15, lw=0)
+axes[0].scatter(np.arange(30), g, c=colors, s=18, zorder=3)
+axes[0].set(xlabel="pair", ylabel="mean gray matter CBF (ml/100 g/min)", yscale="log", ylim=(30, 400), title="pass 1: the band is median ± 2.5 MAD")
+axes[1].bar(np.arange(30), r0, color=colors)
+axes[1].set(xlabel="pair", ylabel="correlation with the mean CBF map", title="pass 2, first iteration, all 30 pairs")
+axes[2].plot(range(len(V)), V, "o-", color=PALETTE[0])
+axes[2].plot([len(V) - 1, len(V)], [V[-1], v_stop], "o--", color=INK["secondary"], mfc="none")
+for i, k in enumerate(order):
+    axes[2].annotate(f"− pair {k}", (i + 1, V[i + 1]), textcoords="offset points", xytext=(6, 6), fontsize=7)
+axes[2].annotate(f"− pair {k_stop}: undone", (len(V), v_stop), textcoords="offset points", xytext=(-44, 22), fontsize=7, color=INK["secondary"])
+axes[2].set(xlabel="pairs removed", ylabel="within-tissue variance V", title="pass 2 alone: V falls, then rises", ylim=(0, None))
+fig.tight_layout()
+```
+
+On the random run pass 1 does all the work. The gray matter means of the still pairs
+scatter around 47.6 ml/100 g/min with a robust SD of 1.5 (the mean of 8260 voxels is a
+precise number even when each voxel is not), and the four pairs with a moved volume sit at
+261, 40, 149, and 217, between 5 and 144 robust SDs away (left panel). SCORE rejects pairs
+2, 6, 13, and 20, exactly the pairs that contain a moved volume and the same four as the
+page's rule, before and after registration. Pass 2 then removes nothing: $V$ is 382
+(ml/100 g/min)², and removing the most correlated of the remaining pairs would raise it to
+395, because once the artifacts are out, removing a pair only adds noise to the mean map.
+
+The other two panels run pass 2 by itself, with pass 1 switched off, to show what it sees.
+With all thirty pairs in the mean, a still pair correlates with the mean map at 0.17 and
+the moved pairs at 0.26, 0.42, 0.77, and 0.70: the mean map of this series is mostly rim,
+and the pairs that put the rim there resemble it most. Pass 2 removes pairs 13, 20, 2, and
+6, in that order, while $V$ falls from 1969 to 382, and stops at the fifth candidate, a
+still pair. Here it reaches the same four pairs as pass 1. It does not always: on the
+registered series, where registration has already shrunk the rims, pass 2 alone removes
+pair 2 ($V$ from 729 to 485) and then stops, because removing pair 13 would raise $V$ to
+491; the other three corrupted pairs are found only by their gray matter means. The two
+passes look at different things, the size of the perfusion signal and the pattern of the
+map, and SCORE needs both.
+
+On the series without outliers SCORE is not silent. In the reference run, which has no
+motion at all, pass 1 rejects pair 13, whose gray matter mean is 2.7 robust SDs below the
+median, and in the uncorrected drift run it rejects pairs 8 and 13. These are fluctuations
+of the noise, not pairs that moved more than their neighbors: a threshold of 2.5 SDs applied to thirty Gaussian values rejects 0.4 of them on
+average, so about one clean 30-pair series in three loses a pair. The cost is small, one
+pair of thirty, and it is the price of any fixed threshold. On the registered drift run
+SCORE rejects nothing, as the page's rule did.
+
+## Correction step by step: SCRUB
+
+SCORE discards whole volumes: a rejected pair gives up its clean voxels along with its
+corrupted ones, and a pair that stays contributes whatever artifact it has. SCRUB
+(structural correlation with robust Bayesian estimation) {cite:p}`dolui2016`, from the
+same authors, replaces the plain average over volumes by a robust estimate in every voxel.
+In ASLPrep it does not replace SCORE but follows it: SCORE first removes the extreme
+volumes, and SCRUB then computes the CBF map from the volumes that remain
+{cite:p}`adebimpe2022`. It has two ingredients.
+
+- **A robust mean.** In each voxel the CBF is an M-estimate {cite:p}`huber1964` over the
+  volumes, computed by iteratively reweighted least squares {cite:p}`holland1977`: every volume gets a weight that falls as its value
+  departs from the current estimate, in units of a robust standard deviation of the voxel's
+  residuals, and the estimate is recomputed with those weights until it settles. A value
+  far from the rest counts little or not at all, in that voxel only.
+- **A structural prior.** The tissue probability maps predict a CBF for every voxel, the
+  global gray and white matter CBF weighted by the voxel's tissue content, and the estimate
+  is pulled toward that prediction, more strongly where the voxel's time series is
+  unusually variable.
+
+With $f_k$ the CBF of pair $k$ in a voxel, $s$ the robust SD of the residuals, $f_\mathrm{prior}$
+the prior, and $\mu$ its weight in units of pairs, the estimate in this page is the fixed
+point of
+
+$$
+\hat f = \frac{\sum_k w_k f_k + \mu\, f_\mathrm{prior}}{\sum_k w_k + \mu},
+\qquad
+w_k = \left[\,1 - \left(\frac{f_k - \hat f}{4.685\, s}\right)^{2}\right]_+^{2} ,
+$$
+
+where $[\,\cdot\,]_+$ sets negative values to zero. The weight $w_k$ is Tukey's biweight
+{cite:p}`beaton1974`: 1 for a value at the estimate, 0 for any value more than 4.685 robust SDs away, a constant
+chosen so that the estimate keeps 95 % of the mean's efficiency when the noise is Gaussian.
+
+:::{admonition} What is published and what is this page's simplification
+:class: note
+SCRUB was published as a conference abstract {cite:p}`dolui2016`, and the working reference
+is the implementation in ASLPrep {cite:p}`adebimpe2022`. Published there: the robust M-estimate
+by iteratively reweighted least squares in every voxel, the prior built from the tissue
+probability maps, and the order, SCRUB after SCORE. This page's own choices: Tukey's
+biweight (ASLPrep's default weight function is Huber's {cite:p}`huber1964`, with the
+biweight as an option);
+the scale $s$ as 1.4826 times the median absolute residual, recomputed at every iteration;
+the prior as the voxel's tissue fractions times the mean of the robust map in each of
+SCORE's three tissue masks (ASLPrep regresses the mean CBF map on the gray and white
+matter probability maps); the prior's weight $\mu$ as the amount by which the voxel's
+variance across pairs exceeds the gray matter median, in units of that median (ASLPrep
+derives it from the same variance ratio through a chi-square threshold); and 15 iterations
+without a convergence test. The cell is a model of the idea, not a port of the code.
+:::
+
+The cell runs the estimate on all thirty pairs, to show the weights at work on the
+corrupted pairs, and on the pairs SCORE kept, the published order.
+
+```{code-cell} python
+:tags: [hide-input]
+def robust_mean(y, prior=0.0, mu=0.0, tune=4.685, n_iter=15):
+    """Tukey-biweight M-estimate of the mean of every row of y (voxels, pairs) by iteratively
+    reweighted least squares; the prior value counts as mu extra pairs. Returns it and the weights."""
+    m = np.median(y, -1)
+    for _ in range(n_iter):
+        r = y - m[:, None]
+        s = 1.4826 * np.median(np.abs(r), -1, keepdims=True) + 1e-9      # robust SD of each voxel's residuals
+        w = np.clip(1 - (r / (tune * s)) ** 2, 0, None) ** 2            # 1 at r = 0, falling to 0 at |r| = tune * s
+        m = ((w * y).sum(-1) + mu * prior) / (w.sum(-1) + mu)
+    return m, w
+
+def fill(a):
+    """Put the values of the brain voxels back into a volume."""
+    out = np.zeros(mask.shape + a.shape[1:]); out[mask] = a
+    return out
+
+def scrub(c):
+    """The page's simplified SCRUB on the brain voxels of a CBF series c (x, y, z, pairs): the robust
+    mean, then the same estimate with the tissue prior. Returns the map, the weights of every pair
+    in every voxel, the robust mean without the prior, the prior's weight, and the prior."""
+    y = c[mask]
+    robust, _ = robust_mean(y)
+    prior = sum(fr[t][mask] * robust[tissue[t][mask]].mean() for t in tissue)   # tissue fractions times the tissue means
+    var = y.var(-1, ddof=1)
+    mu = np.clip(var / np.median(var[tissue["gm"][mask]]) - 1, 0, None)         # prior weight in pairs: the voxel's excess variance
+    return [fill(a) for a in (*robust_mean(y, prior, mu), robust, mu, prior)]
+
+cbf_s, w, robust, mu, prior = scrub(cbf_ts["random, uncorrected"])
+still_pairs = [k for k in range(30) if k not in moved_pairs]
+low = (w[inner] < 0.5).mean(0)
+rim = inner & (np.abs(d_rand[..., 2] - d_rand[..., still_pairs].mean(-1)) > 300)
+print(f"random, uncorrected: mean weight over the brain, still pairs {w[inner][:, still_pairs].mean():.2f}, moved pairs " + ", ".join(f"{k}: {w[inner][:, k].mean():.2f}" for k in moved_pairs))
+print(f"brain voxels with a weight below 0.5: still pairs {100 * low[still_pairs].mean():.0f} %, moved pairs " + ", ".join(f"{k}: {100 * low[k]:.0f} %" for k in moved_pairs))
+print(f"in the {rim.sum()} voxels where pair 2 is more than 300 units from the mean of the still pairs: weight of pair 2 {w[rim][:, 2].mean():.3f}, of the still pairs {w[rim][:, still_pairs].mean():.2f}")
+fig = plt.figure(figsize=(12, 3.4), layout="constrained")
+gs = fig.add_gridspec(1, 4, width_ratios=[1.6, 1, 1, 1])
+ax = fig.add_subplot(gs[0])
+ax.bar(np.arange(30), 100 * low, color=colors)
+ax.set(xlabel="pair", ylabel="brain voxels with weight < 0.5 (%)", title="random run: where the weights are low")
+for j, (k, title) in enumerate([(0, "weights of pair 0 (still)"), (2, "weights of pair 2"), (20, "weights of pair 20")]):
+    im = show_slice(fig.add_subplot(gs[j + 1]), np.where(mask, w[..., k], np.nan), K, title, kind="fraction")
+fig.colorbar(im, ax=fig.axes[1:], shrink=0.75, label="weight")
+```
+
+The weights do voxel by voxel what rejection does pair by pair. A still pair has a mean
+weight of 0.92 over the brain, the small tax the biweight levies on clean data, and a
+weight below 0.5 in 1 % of the voxels, the tail of its own noise. The moved pairs have a
+weight below 0.5 in 19 to 46 % of the voxels (bars), and the maps show where: pair 0 is
+near 1 everywhere, while pairs 2 and 20 are at zero along the edge of the brain and around
+the ventricles and sulci, where the rims are, and keep a high weight in between. In the
+3605 voxels where the difference image of pair 2 is more than 300 units from the mean of
+the still pairs, its weight is 0.005, and the still pairs keep 0.93 there. The estimator
+has removed the rim and kept the rest of the pair.
+
+```{code-cell} python
+:tags: [hide-input]
+gm_rmse = lambda cbf: quant.score(cbf, truth_cbf, inner & gm)["rmse"]
+scrub_all, scrub_score = {}, {}
+print(f"CBF RMSE in gray matter (ml/100 g/min){'':>4} {'mean of 30':>10} {'SCORE':>6} {'robust mean, 30':>16} {'SCRUB, 30':>10} {'SCORE + SCRUB':>14}")
+for name, c in cbf_ts.items():
+    scrub_all[name], _, robust_all, _, _ = scrub(c)
+    scrub_score[name] = scrub(c[..., score_keep[name]])[0]
+    print(f"{name:>41} {gm_rmse(c.mean(-1)):>10.1f} {gm_rmse(c[..., score_keep[name]].mean(-1)):>6.1f} {gm_rmse(robust_all):>16.1f} {gm_rmse(scrub_all[name]):>10.1f} {gm_rmse(scrub_score[name]):>14.1f}")
+print(f"random, uncorrected: prior weight in pairs, median over gray matter {np.median(mu[inner & gm]):.2f}, in the {rim.sum()} rim voxels of pair 2 {np.median(mu[rim]):.0f}; "
+      f"the tissue prior alone has a gray matter RMSE of {gm_rmse(prior):.1f}")
+```
+
+The table says what that is worth, as the gray matter CBF error against the truth. The
+robust mean of all thirty pairs of the uncorrected random run, with no prior and no
+decision about any pair, reaches 22.5 ml/100 g/min, against 22.2 for SCORE and 70.5 for the
+plain mean: down-weighting recovers what discarding recovers. It is slightly behind
+because a clean value never gets full weight and because a rim value of two or three
+noise SDs, inside the cutoff, keeps part of its weight. With the prior the error is 21.0,
+below SCORE's, and that number needs care. The prior's weight is 0.16 pairs in the median
+gray matter voxel and 10 pairs in the rim voxels, where the moved pairs inflated the
+variance, so it acts where the data are worst; but in this phantom the prior is nearly
+the truth, because the phantom's perfusion is constant within each tissue. The prior map
+alone has a gray matter error of 10.8, half that of the motion-free 30-pair mean. In a
+brain, perfusion varies within gray matter, and the prior pulls a contaminated voxel
+toward the tissue average rather than toward its own value; the gain measured here is an
+upper bound, and the same caution applies to the registered random series, where the
+prior takes the error from 29.1 to 24.5. In the published order, after SCORE, there is
+little left to do: 22.5 against SCORE's 22.2, because once the four pairs are gone no
+voxel has much excess variance and the estimate is the robust mean with its small tax. For
+the drift runs and the reference all five columns agree to within 0.7: with nothing to
+reject or down-weight, SCORE and SCRUB cost little (21.0 to 21.5 on the reference) and
+change nothing.
+
+## Residual error versus truth
+
+Registration, the page's rule, SCORE, and the simplified SCRUB in combination, scored on the
+mean difference image and on the CBF computed from it with the run's own M0 scan
+([Chapter 14](../04-quantification/14-cbf-quantification.md)) against the unmoved truth; the
+motion-free reference sets the noise floor. A SCRUB map is a CBF map, and its ΔM column is
+that map converted back to image units voxel by voxel.
+
+```{code-cell} python
+:tags: [hide-input]
 rows, cbf_maps = [], {}
 for name in ("random", "drift"):
     big = (np.abs(est[name][:, :3]).max(1) > 0.1) | (np.abs(est[name][:, 3:]).max(1) > 0.1)   # estimated motion above 0.1 mm or 0.1 degree
     reg_sel = np.where(big[None, None, None, :], reg[name], mag[name])                          # resample only those volumes
     cases = {"uncorrected": (d_raw[name], None), "registered": (d_reg[name], None),
              "rejected": (d_raw[name], flags[f"{name}, uncorrected"]), "registered + rejected": (d_reg[name], flags[f"{name}, registered"]),
-             f"registered ({big.sum()} vols) + rejected": (quant.subtract(reg_sel, ctx), flags[f"{name}, registered"])}
+             f"registered ({big.sum()} vols) + rejected": (quant.subtract(reg_sel, ctx), flags[f"{name}, registered"]),
+             "SCORE": (d_raw[name], score_keep[f"{name}, uncorrected"]), "registered + SCORE": (d_reg[name], score_keep[f"{name}, registered"])}
     for label, (d, keep) in cases.items():
         dm = d.mean(-1) if keep is None else d[..., keep].mean(-1)
-        cbf = cbf_of(runs[name], dm)
+        cbf_maps[(name, label)] = cbf_of(runs[name], dm)
+        rows.append((name, label, 30 if keep is None else int(keep.sum()), rms(dm, truth_dm[name]), gm_rmse(cbf_maps[(name, label)])))
+    per_unit = np.maximum(cbf_of(runs[name], np.ones(mask.shape)), 1e-12)                       # CBF per unit of ΔM, to express a SCRUB map as ΔM
+    for label, cbf, n in [("SCRUB, all pairs", scrub_all[f"{name}, uncorrected"], 30), ("SCORE + SCRUB", scrub_score[f"{name}, uncorrected"], score_keep[f"{name}, uncorrected"].sum()),
+                          ("registered + SCORE + SCRUB", scrub_score[f"{name}, registered"], score_keep[f"{name}, registered"].sum())]:
         cbf_maps[(name, label)] = cbf
-        rows.append((name, label, 30 if keep is None else int(keep.sum()), rms(dm, truth_dm[name]), quant.score(cbf, truth_cbf, inner & gm)["rmse"]))
-cbf_ref = cbf_of(ref, d_ref.mean(-1))
-rows.append(("reference", "no motion", 30, rms(d_ref.mean(-1), truth_dm["random"]), quant.score(cbf_ref, truth_cbf, inner & gm)["rmse"]))
+        rows.append((name, label, int(n), rms(cbf / per_unit, truth_dm[name]), gm_rmse(cbf)))
+per_unit = np.maximum(cbf_of(ref, np.ones(mask.shape)), 1e-12)
+for label, cbf, n in [("no motion", cbf_of(ref, d_ref.mean(-1)), 30), ("no motion, SCORE + SCRUB", scrub_score["reference, no motion"], score_keep["reference, no motion"].sum())]:
+    rows.append(("reference", label, int(n), rms(cbf / per_unit, truth_dm["random"]), gm_rmse(cbf)))
 print(f"{'run':>10} {'correction':>34} {'pairs':>5} {'ΔM RMSE':>9} {'CBF RMSE in GM':>15}")
 for r in rows:
     print(f"{r[0]:>10} {r[1]:>34} {r[2]:>5} {r[3]:>9.1f} {r[4]:>15.1f}")
 
 fig, axes = plt.subplots(1, 4, figsize=(12, 3.3), layout="constrained")
-for ax, label in zip(axes, ["uncorrected", "registered", "rejected", "registered + rejected"]):
+for ax, label in zip(axes, ["uncorrected", "registered", "SCORE", "SCRUB, all pairs"]):
     show_slice(ax, np.where(inner, cbf_maps[("random", label)] - truth_cbf, np.nan), K, f"CBF error, {label}", kind="diff", vmin=-60, vmax=60)
 fig.colorbar(axes[3].images[0], ax=axes.tolist(), shrink=0.75, label="ml/100 g/min")
 ```
@@ -433,15 +727,31 @@ few hundredths of a millimeter for the 54 still volumes, and resampling a volume
 hundredth of a voxel still changes its edge voxels by tens of units, differently for the
 control and the label of a pair, which is visible on a signal of 30. Leaving alone every
 volume whose estimated motion is below 0.1 mm and 0.1° (fifth row: only the six moved
-volumes are resampled) gives back what rejection alone achieves. For the drift, rejection
+volumes are resampled) gives back what rejection alone achieves. SCORE's rows repeat the
+page's rule on this run, since it rejects the same four pairs: 11.2 units and a CBF error of
+22.2 on the uncorrected series, 14.0 and 30.7 after registration. The simplified SCRUB on
+all thirty pairs reaches 11.4 units and 21.0 without discarding a pair, the prior's help
+included; after SCORE it adds nothing (11.4 and 22.5), and after registration and SCORE
+nothing either (13.9 and 30.6). For the drift, rejection
 does nothing and registration does nearly everything: 15.4 to 11.2 units, and a CBF error
 of 27 against the floor of 21, the difference being the blur of sixty resampled volumes.
-The error maps say the same in pictures. A real pipeline does both, in this order:
-registration for the slow motion every subject has, then rejection for the pairs a jump has
-corrupted; ASLPrep, for example, realigns with MCFLIRT and then applies SCORE and its
-successor SCRUB {cite:p}`adebimpe2022`. The drift case also shows why the reference
-matters: the mean control image of 3 mm of drift is itself blurred, so pipelines refine the
-reference by re-averaging the aligned volumes and registering again.
+SCORE's two false rejections on the uncorrected drift cost a little (15.6 units and 29.6
+with 28 pairs), and SCRUB leaves the run where it was. The last row sends the motion-free
+reference through SCORE and SCRUB: 29 pairs, 10.8 units, and 21.5 against 10.5 and 21.0,
+the price of running both on a series that needed neither. The error maps say the same in
+pictures: the rim of the uncorrected map is thinner after registration and gone after
+SCORE and after SCRUB; the SCRUB map is also paler along the edge of the brain, where the
+prior has taken over from the most variable voxels.
+
+A real pipeline does both, in this order: registration for the slow motion every subject
+has, then rejection or down-weighting for the pairs a jump has corrupted. ASLPrep, for
+example, estimates the motion with MCFLIRT, computes a CBF time series from the realigned
+volumes, and offers SCORE followed by SCRUB on that series {cite:p}`adebimpe2022`;
+ExploreASL realigns with SPM and then applies the ENABLE rule {cite:p}`shirzadi2018`: it
+sorts the pairs by their estimated motion and excludes the most-moved pairs for as long as
+that improves the temporal stability of the signal {cite:p}`mutsaerts2020`. The drift case also shows
+why the reference matters: the mean control image of 3 mm of drift is itself blurred, so
+pipelines refine the reference by re-averaging the aligned volumes and registering again.
 
 ## See it: the same jumps under background suppression
 
@@ -495,6 +805,9 @@ signal and of an M0 scan from elsewhere.
 
 ## Further reading
 
-Rigid-body registration {cite:p}`jenkinson2002`; outlier rejection for ASL {cite:p}`dolui2017`;
-the pipeline order in ASLPrep {cite:p}`adebimpe2022` and ExploreASL {cite:p}`mutsaerts2020`;
-framewise displacement {cite:p}`power2012`; the white paper {cite:p}`alsop2015`.
+Rigid-body registration {cite:p}`jenkinson2002`; outlier handling for ASL, from the
+mean-and-SD filter {cite:p}`tan2009` to SCORE {cite:p}`dolui2017`, SCRUB
+{cite:p}`dolui2016`, and the motion-sorted exclusion of ENABLE {cite:p}`shirzadi2018`; the
+robust statistics behind SCRUB {cite:p}`huber1964,beaton1974,holland1977`; the pipeline order in ASLPrep {cite:p}`adebimpe2022` and ExploreASL
+{cite:p}`mutsaerts2020`; framewise displacement {cite:p}`power2012`; the white paper
+{cite:p}`alsop2015`.

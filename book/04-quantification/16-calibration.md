@@ -69,8 +69,9 @@ def gm_mean(img, masks):
 
 ## What the formula asks for
 
-The single-delay formula of [Chapter 14](./14-cbf-quantification.md) divides the
-difference signal by the equilibrium magnetization of arterial blood:
+The single-delay formula of [Chapter 14](./14-cbf-quantification.md)
+{cite:p}`alsop2015` divides the difference signal by the equilibrium magnetization of
+arterial blood:
 
 $$
 f = \frac{6000\,\lambda\,\Delta M\,e^{\mathrm{PLD}/T_{1b}}}{2\,\alpha\,T_{1b}\,M_0\,\bigl(1-e^{-\tau/T_{1b}}\bigr)},
@@ -78,8 +79,8 @@ f = \frac{6000\,\lambda\,\Delta M\,e^{\mathrm{PLD}/T_{1b}}}{2\,\alpha\,T_{1b}\,M
 $$
 
 where $M_0$ is the equilibrium magnetization of the tissue in the voxel and $\lambda$, the
-blood-brain partition coefficient of water (ml of water per gram of tissue over ml of water
-per ml of blood), converts it to that of blood, $M_{0b}$. The formula is a ratio: $\Delta M$
+blood-brain partition coefficient of water {cite:p}`herscovitch1985` (ml of water per gram
+of tissue over ml of water per ml of blood), converts it to that of blood, $M_{0b}$. The formula is a ratio: $\Delta M$
 and $M_0$ must be in the same units, measured with the same coil, the same receiver gain,
 the same voxel, and the same readout. That is the whole purpose of the calibration image.
 The ratio is small. On the reference protocol a pure gray-matter voxel has $\Delta M \approx
@@ -96,7 +97,7 @@ $$
 with $k$ the scanner's scale, $T_1$ and $T_2$ those of the tissue in the voxel. The
 difference image holds $\Delta M_{\text{meas}} = k\,\Delta M\,e^{-\mathrm{TE}/T_{2b}}$: the
 labeled water is in blood (aslscan keeps it there; in vivo it takes on the tissue's $T_2$
-once it has exchanged, so the blood value is an upper bound on the difference). The
+once it has exchanged {cite:p}`gregori2013`, so the blood value is an upper bound on the difference). The
 calibration therefore needs two corrections on top of the division by $\lambda$:
 
 $$
@@ -261,7 +262,8 @@ tissue $T_1$ {cite:p}`adebimpe2022,mutsaerts2020`), but only if the field is the
 ## See it: the echo time and the T2 of blood
 
 The labeled water and the static tissue decay at different rates during the readout.
-Blood's $T_2$ at 3 T is about 165 ms; gray matter's is 80 ms. The measured ratio
+The simulator takes the $T_2$ of arterial blood at 3 T as 165 ms, and the phantom's gray
+matter has 80 ms. The measured ratio
 $\Delta M / S_{M_0}$ in gray matter therefore drifts with the echo time as
 $e^{-\mathrm{TE}/T_{2b}} / e^{-\mathrm{TE}/T_{2,\mathrm{GM}}}$, and CBF from an
 uncorrected calibration rises with it. The `te-sweep` dataset acquires the reference
@@ -309,15 +311,16 @@ values is 1.123 and 1.362. Right, what that does to CBF: uncorrected, 47.4 at 12
 becomes 53.2 at 30 ms and 64.6 at 60 ms, a 36 percent spread from an acquisition
 parameter that changes nothing about the perfusion; corrected with both factors, all three
 echo times give 43.7 to 43.8. The correction depends on a blood $T_2$ that is not measured
-and varies with oxygenation and hematocrit, which is the argument for the short echo time
-the white paper recommends: at 12 ms the whole factor is 1.08 and an error of 30 ms in
+and varies with oxygenation and hematocrit {cite:p}`zhao2007`, which is the argument for the short echo time
+the white paper recommends {cite:p}`alsop2015`: at 12 ms the whole factor is 1.08 and an error of 30 ms in
 $T_{2b}$ moves CBF by about 1 percent; at 60 ms the same error moves it by close to 7
 percent.
 
 ## See it: the CSF reference
 
 When the tissue partition coefficient is not trusted, or when a pipeline prefers a single
-calibration number, $M_{0b}$ can be read from cerebrospinal fluid {cite:p}`chalela2000`.
+calibration number, $M_{0b}$ can be read from cerebrospinal fluid {cite:p}`chalela2000`;
+{cite:t}`pinto2020` compare this reference-region calibration with the voxelwise one.
 CSF is nearly pure water, blood is about 87 percent water by volume
 {cite:p}`herscovitch1985`, so
 
@@ -362,8 +365,9 @@ Left, the 142 voxels that are at least 90 percent CSF, in the lateral ventricles
 the blood $M_0$ each route produces. The tissue route gives 7762 against the true 7710,
 within 0.7 percent. The CSF route with the textbook constant gives 5526, 28 percent low,
 which would put CBF 39 percent high. The reason is the phantom, not the method: the
-ASLDRO phantom assigns CSF an $M_0$ of 68.0 and gray matter 74.6, whereas in a real
-proton-density image CSF is the brightest tissue, about 1.28 times gray matter. The
+ASLDRO phantom {cite:p}`olivertaylor2021` assigns CSF an $M_0$ of 68.0 and gray matter 74.6, whereas the
+two constants of the routes, 1.15 for CSF and 0.9 for tissue, imply a CSF $M_0$ that is
+1.15/0.9 = 1.28 times the tissue's. The
 phantom's own ratio of CSF to blood is 0.82, and with that constant the CSF route lands on
 the truth (third bar). The lesson transfers: the CSF route replaces one assumed constant
 ($\lambda$) with another ($\lambda_{\mathrm{CSF}}$, plus CSF's $T_1$ and $T_2$), and it
@@ -408,7 +412,8 @@ for hct in (0.35, 0.42, 0.50):
 
 Each panel moves one constant with the others at their white-paper values. A change of
 0.05 in $\lambda$ moves CBF by 5.6 percent, and using the gray-matter-specific 0.98
-instead of the whole-brain 0.9 raises gray-matter CBF by 8.9 percent. $T_{1b}$ is the
+instead of the whole-brain 0.9 {cite:p}`herscovitch1985` raises gray-matter CBF by 8.9
+percent. $T_{1b}$ is the
 most sensitive of the three: a change of 0.1 s moves CBF by 8 to 10 percent in the
 opposite direction (+10.4 percent for 1.55 s, −8.4 percent for 1.75 s), because it enters
 the exponential of the delay, the exponential of the bolus, and the prefactor. The
@@ -417,7 +422,7 @@ hematocrit dependence measured by {cite:t}`lu2004`, $1/T_{1b} = 0.52\,\mathrm{Hc
 subject with polycythemia and one with anemia differ by 20 percent in reported CBF (+9.0
 and −10.6 percent) from this constant alone. A change of 0.05 in $\alpha$ moves CBF by
 5.6 to 6.2 percent; a PCASL efficiency measured at 0.80 rather than the assumed 0.85
-raises CBF by 6.2 percent, and the CASL value of 0.68 is 25 percent away. None of these
+raises CBF by 6.2 percent, and the CASL value of 0.68 {cite:p}`wang2005,wu2007` is 25 percent away. None of these
 is a random error. Each is a fixed scale on every map from one scanner and protocol,
 invisible in a within-study comparison and decisive when two studies' absolute values are
 compared.
@@ -467,7 +472,8 @@ Dashed lines are the truth (60 ml/100 g/min and 0.8 s); the dotted vertical is t
 phantom's gray-matter $T_1$ of 1.33 s. The assumed $T_1$ is the strongest lever in this
 chapter. Between 1.1 and 1.5 s, gray-matter CBF moves from 82.1 to 59.2 and the transit
 time from 1.00 to 0.83 s, about 1 percent in CBF per 0.01 s of $T_1$ over the range of
-values a pipeline might pick. At the true 1.33 s the fit gives 67.1 and 0.89 s, above
+values a pipeline might pick (published gray-matter values at 3 T run from 1.33 s
+{cite:p}`wansapura1999` to 1.82 s {cite:p}`stanisz2005`). At the true 1.33 s the fit gives 67.1 and 0.89 s, above
 the truth because five pairs per delay leave the transit-time grid search biased by noise
 ([Chapter 15](./15-multi-delay.md)), and the coupling of ATT and CBF carries that bias
 into the CBF. White matter is not shown: with a difference of about 4 image units against
@@ -480,7 +486,8 @@ $T_1$ map or accept this dependence.
 ## The sidecar as the record
 
 Every constant above is a number somebody chose, and the only place the choice survives
-is the sidecar. ASL-BIDS makes `LabelingEfficiency` an optional field; aslscan records
+is the sidecar. ASL-BIDS makes `LabelingEfficiency` an optional field {cite:p}`clement2022`; aslscan
+records
 every constant it resolved, with its source, under `AslscanSimulation.Resolved`.
 
 ```{code-cell} python
@@ -528,7 +535,9 @@ The white paper's calibration section and its recommended constants
 {cite:p}`alsop2015`; the pitfalls of calibration in post-processing, reviewed by
 {cite:t}`pinto2020`; the CSF-based route {cite:p}`chalela2000`; the partition coefficient
 of water {cite:p}`herscovitch1985`; the $T_1$ of blood and its hematocrit dependence at
-3 T {cite:p}`lu2004`; the phase-contrast measurement of PCASL efficiency
+3 T {cite:p}`lu2004`, and a model that adds oxygen saturation and field strength
+{cite:p}`hales2016`; tissue relaxation times at 3 T {cite:p}`wansapura1999,stanisz2005`;
+the phase-contrast measurement of PCASL efficiency
 {cite:p}`aslan2010`; the ASL-BIDS fields that carry the calibration metadata
 {cite:p}`clement2022`; and how two pipelines implement the corrections
 {cite:p}`adebimpe2022,mutsaerts2020`.

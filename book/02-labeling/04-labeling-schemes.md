@@ -58,14 +58,18 @@ assumed to quantify it, and for what can go wrong.
 
 ## Pulsed labeling
 
-**Pulsed ASL (PASL)** inverts a thick slab of tissue and blood, typically 10 cm or more,
-below the imaging region with a single adiabatic inversion pulse lasting 10–15 ms. The
+**Pulsed ASL (PASL)** inverts a thick slab of tissue and blood, 15 to 20 cm in the white
+paper's recommendation {cite:p}`alsop2015`, below the imaging region with a single
+adiabatic inversion pulse a few milliseconds long. The
 first implementations differed in where the slab was and how the control was made. EPISTAR
 inverted a slab below the imaging slices and, for control, the mirror-image slab above
 them {cite:p}`edelman1994`. FAIR inverted everything with a non-selective pulse and, for
 control, only the imaging slab with a selective one, so that the difference is the blood
-that flowed in from outside the slab {cite:p}`kim1995`. PICORE inverts the slab below the
-slices and applies the same pulse off-resonance, away from any tissue, for the control.
+that flowed in from outside the slab {cite:p}`kim1995,kwong1995`; inversion-recovery images
+sensitive to inflowing blood had already been used to map brain activation
+{cite:p}`kwong1992`. PICORE inverts the slab below the
+slices and applies the same pulse off-resonance, away from any tissue, for the control
+{cite:p}`wong1997`.
 All three deliver the same thing: at $t = 0$, all the arterial blood in the labeling
 region is inverted at once, and from then on it drains into the brain.
 
@@ -82,10 +86,11 @@ saturation with a train of thin-slice saturation pulses at the leading edge of t
 repeated from $\mathrm{TI}_1$ until shortly before the readout, which makes the cut-off
 sharper and less sensitive to the slab profile {cite:p}`luh1999`. The book's PASL protocol
 is FAIR with a Q2TIPS cut-off at 0.7 s and an inversion time of 1.8 s; its labeling
-efficiency is 0.98, because a single adiabatic pulse inverts nearly perfectly.
+efficiency is 0.98, the white paper's value for pulsed labeling {cite:p}`alsop2015`,
+because a single adiabatic pulse inverts nearly perfectly.
 
 The pulsed clock runs from the inversion pulse. The delay between it and the readout is
-the **inversion time (TI)**; BIDS records it as `PostLabelingDelay` all the same, and
+the **inversion time (TI)**; BIDS {cite:p}`clement2022` records it as `PostLabelingDelay` all the same, and
 the kinetic model's time $t$ is TI. Because the whole bolus was labeled at $t = 0$, all of
 it has decayed by $e^{-t/T_{1b}}$ when it is imaged, which is the pulsed branch of the
 model in [Chapter 5](./05-kinetic-model.md).
@@ -93,13 +98,14 @@ model in [Chapter 5](./05-kinetic-model.md).
 ## Continuous labeling
 
 **Continuous ASL (CASL)** does not invert a region; it inverts a *plane*
-{cite:p}`williams1992`. A long, low-power RF pulse, one to three seconds, is applied
+{cite:p}`williams1992`. A long, low-power RF pulse, lasting seconds, is applied
 together with a magnetic field gradient along the direction of flow, so that the RF is on
 resonance only in one thin plane across the feeding arteries in the neck. Blood flowing
 through the plane experiences the RF frequency sweeping past its resonance as its
 position changes, and if the sweep is slow enough compared with the RF amplitude, its
 magnetization follows the effective field and ends inverted: a **flow-driven adiabatic
-inversion**. Blood that reaches the plane is labeled continuously for as long as the RF is
+inversion**, the adiabatic fast passage that {cite:t}`dixon1986` used to label flowing
+blood for angiography. Blood that reaches the plane is labeled continuously for as long as the RF is
 on, so the bolus duration $\tau$ is the **labeling duration (LD)**, set by the operator.
 That is the great advantage over pulsed labeling: the bolus is long and its duration is
 known. The interval from the end of labeling to the readout is the **post-labeling delay
@@ -110,8 +116,8 @@ Continuous labeling has two costs. The first is **magnetization transfer (MT)**.
 labeling RF is applied for seconds at a frequency offset from the imaging slices; it
 does not excite their free water, but it does saturate the broad resonance of the
 protons bound to macromolecules, which exchange magnetization with the free water and
-lower the tissue signal by several percent. That is far more than the perfusion signal,
-so the control must reproduce the same MT. For a single slice it can: apply the control
+lower the tissue signal {cite:p}`zhang1995`. The loss is far larger than the perfusion
+signal, so the control must reproduce the same MT. For a single slice it can: apply the control
 RF at the mirror-image offset, on the other side of the slice, with the gradient
 reversed, and the tissue sees the same off-resonance power. For many slices at different
 offsets no single mirror works. The **amplitude-modulated control** solves this by
@@ -119,9 +125,11 @@ modulating the control RF with a sinusoid, which makes two closely spaced invers
 planes instead of one; blood passing both is inverted twice, net unlabeled, while the RF
 power and its MT are the same as in the label condition {cite:p}`alsop1998`. The double
 inversion is imperfect, and the label itself is imperfect, so the efficiency of CASL with
-this control is about 0.68 rather than the 0.8–0.9 of the inversion alone. The second
-cost is hardware: a seconds-long RF pulse exceeds the duty cycle of most body transmit
-coils, and continuous labeling was for years a research method with dedicated coils.
+this control, about 0.68 at 3 T {cite:p}`wang2005,wu2007`, is lower than that of the inversion
+alone. The second
+cost is hardware: a seconds-long continuous RF pulse is more than the body transmit
+hardware of most clinical scanners is built to deliver, which is the white paper's stated
+reason for preferring the pseudo-continuous form {cite:p}`alsop2015`.
 
 ## Pseudo-continuous labeling
 
@@ -132,21 +140,26 @@ across the labeling plane, and a smaller net gradient between pulses. Blood movi
 the plane sees the train as an approximately continuous adiabatic sweep and is inverted;
 the pulses are short enough for any scanner's transmit coil. The control plays the same
 pulses with their phase alternating by 180° from pulse to pulse, so that the net effect on
-the flowing spins cancels while the average RF power, and hence the MT, is identical. The
-inversion efficiency measured in a flow phantom is 0.85, and that is the value the ASL
-white paper adopts and the simulator uses by default {cite:p}`alsop2015`.
+the flowing spins cancels while the average RF power, and hence the MT, is identical.
+Simulations put the best achievable inversion efficiency at 0.85 over the range of
+arterial velocities, with 0.80 measured {cite:p}`wu2007`, and a later in vivo measurement
+against phase-contrast flow gave 0.86 {cite:p}`aslan2010`; 0.85 is the value the ASL white
+paper adopts and the simulator uses by default {cite:p}`alsop2015`.
 
 The pulse train has a weakness that continuous labeling does not: between pulses, the
 spins at the labeling plane accumulate phase from any **off-resonance** there, and a
-field offset of a few tens of hertz (common in the neck, near the air of the trachea and
-the sinuses) detunes the train and reduces the efficiency. The efficiency also falls when
+field offset at the labeling plane detunes the train and reduces the efficiency
+{cite:p}`zhao2017`. The
+efficiency also depends on the velocity of the blood {cite:p}`aslan2010`, falling when
 blood moves too fast or when its velocity pulses through the cardiac cycle
 {cite:p}`zhao2017`; both are why the labeling plane is placed where the carotid and
 vertebral arteries run straight and where the field is uniform, and why some
 implementations calibrate the RF phase per subject. In the *balanced* implementation the
 label and control use the same gradient waveform and differ only in RF phase; in the
-*unbalanced* one the control's mean gradient is set to zero, which is less sensitive to
-eddy currents and more sensitive to off-resonance. The simulator models none of this: its
+*unbalanced* one the control's mean gradient is set to zero. Both were implemented early
+{cite:p}`wu2007`, and in simulation and experiment the unbalanced scheme was the more
+robust of the two to off-resonance {cite:p}`zhao2017`; the white paper prefers it for the
+same reason {cite:p}`alsop2015`. The simulator models none of this: its
 PCASL is a bolus of duration LD with efficiency $\alpha$.
 
 ## The control, and what $\alpha$ means
@@ -165,7 +178,7 @@ $2\alpha M_{0b}$, with $\alpha = 1$ for a perfect inversion. It folds in everyth
 reduces the label, including the imperfect control of CASL, and it multiplies the signal
 and therefore the CBF estimate directly: a CBF computed with $\alpha = 0.85$ when the true
 efficiency was 0.75 is 13 % too low. BIDS records the value the acquisition assumes in the
-sidecar field `LabelingEfficiency`. The simulator takes a default per labeling type
+sidecar field `LabelingEfficiency` {cite:p}`clement2022`. The simulator takes a default per labeling type
 (`presets.ALPHA`) unless the protocol overrides it, and records the value it used and where
 it came from under `AslscanSimulation.Resolved.LabelingEfficiency`:
 
@@ -391,8 +404,8 @@ sidecar, and the quantification formula must use each scheme's own.
 
 ## What this implies for acquisition
 
-- **Prefer PCASL** on standard hardware: the white paper's recommendation, for its long,
-  known bolus and its compatibility with body coils. Use its efficiency of 0.85 unless it
+- **Prefer PCASL** on standard hardware: the white paper's recommendation
+  {cite:p}`alsop2015`, for its long, known bolus and its compatibility with body coils. Use its efficiency of 0.85 unless it
   was measured, and record it in `LabelingEfficiency`.
 - **Place the labeling plane** perpendicular to straight segments of the carotid and
   vertebral arteries, away from the air spaces of the neck: off-resonance at the plane
@@ -409,10 +422,15 @@ sidecar, and the quantification formula must use each scheme's own.
 
 ## Further reading
 
-The first pulsed methods, EPISTAR {cite:p}`edelman1994` and FAIR {cite:p}`kim1995`, and the
+The first pulsed methods, EPISTAR {cite:p}`edelman1994`, FAIR {cite:p}`kim1995,kwong1995`
+and PICORE {cite:p}`wong1997`, and the
 cut-offs that make them quantitative, QUIPSS II {cite:p}`wong1998` and Q2TIPS
-{cite:p}`luh1999`. Continuous labeling {cite:p}`williams1992`, the post-labeling delay
-{cite:p}`alsop1996` and the amplitude-modulated control {cite:p}`alsop1998`.
-Pseudo-continuous labeling {cite:p}`dai2008` and its off-resonance and velocity sensitivity
-{cite:p}`zhao2017`. The consensus recommendations on which scheme to use and with what
-efficiency {cite:p}`alsop2015`.
+{cite:p}`luh1999`. Continuous labeling {cite:p}`williams1992` and the adiabatic fast
+passage behind it {cite:p}`dixon1986`, its magnetization transfer {cite:p}`zhang1995`, the
+post-labeling delay {cite:p}`alsop1996`, and the amplitude-modulated control
+{cite:p}`alsop1998` and its efficiency at 3 T {cite:p}`wang2005,wu2007`.
+Pseudo-continuous labeling {cite:p}`dai2008`, its labeling efficiency in theory and
+experiment {cite:p}`wu2007` and in vivo {cite:p}`aslan2010`, and its off-resonance and
+velocity sensitivity {cite:p}`zhao2017`. The consensus recommendations on which scheme to
+use and with what efficiency {cite:p}`alsop2015`, and the BIDS fields that record the
+scheme and its parameters {cite:p}`clement2022`.

@@ -44,8 +44,9 @@ COLORS = {**TISSUE_COLORS, "blood": BLOOD_COLOR}
 
 Hydrogen nuclei (protons) carry a magnetic moment. In the scanner's static field $B_0$ they
 do not simply line up with the field. Like a spinning top tilted in gravity, each moment
-swings around the field direction, a motion called precession. The rate of that swing, the
-Larmor frequency, is proportional to the field:
+swings around the field direction, a motion called precession ({cite:t}`haacke1999` and
+{cite:t}`nishimura2010` are the textbook treatments of everything in this chapter). The rate
+of that swing, the Larmor frequency, is proportional to the field:
 
 $$f_0 = \frac{\gamma}{2\pi} B_0, \qquad \frac{\gamma}{2\pi} = 42.58\ \mathrm{MHz/T}.$$
 
@@ -63,9 +64,10 @@ The precession frequency follows the local field. Any deviation from $B_0$, whet
 susceptibility of tissue and air or from a gradient applied on purpose, changes the frequency
 in proportion. A gradient is used deliberately to encode position
 ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)); an unwanted offset near the
-sinuses displaces the image ([Chapter 11](../03-preprocessing/11-susceptibility-distortion.md))
-and, for pseudo-continuous labeling, reduces how well the blood is labeled
-([Chapter 4](../02-labeling/04-labeling-schemes.md)).
+sinuses displaces the image {cite:p}`jezzard1995`
+([Chapter 11](../03-preprocessing/11-susceptibility-distortion.md))
+and, for pseudo-continuous labeling {cite:p}`dai2008`, reduces how well the blood is labeled
+{cite:p}`zhao2017` ([Chapter 4](../02-labeling/04-labeling-schemes.md)).
 
 ## Excitation and relaxation
 
@@ -74,11 +76,12 @@ field direction by a chosen flip angle. After a 90° pulse the magnetization lie
 transverse plane, precesses, and induces a voltage in the receive coil: that voltage is the MR
 signal. After a 180° pulse it points against the field and gives no signal until a later
 pulse tips it into the plane. ASL uses both: 90° pulses to read out images, and 180°
-(inversion) pulses to label blood and to suppress the static tissue. The animation follows
+(inversion) pulses to label blood {cite:p}`williams1992` and to suppress the static tissue
+{cite:p}`ye2000`. The animation follows
 the net magnetization of a voxel, drawn as one arrow, through a 90° pulse and the recovery
 that follows, with the precession slowed enormously (the real arrow turns 128 million times
-per second at 3 T) and T1 only three times T2 rather than the ten to twenty times of brain
-tissue. The orange line is the arrow's shadow on the transverse plane, which is what the
+per second at 3 T) and T1 only three times T2 rather than the 8 times (white matter) to 17
+times (gray matter) of the simulated brain. The orange line is the arrow's shadow on the transverse plane, which is what the
 receive coil detects.
 
 ```{code-cell} python
@@ -156,9 +159,14 @@ The longitudinal one is the subject of this chapter, because ASL is a story abou
 ### The tissues of the simulated brain
 
 The simulated brain is piecewise constant: one T1, T2, T2*, and $M_0$ per tissue class, with
-the values of the ASLDRO 3 T phantom ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
-Arterial blood, which ASL labels, has a T1 of 1.65 s and a T2 of 165 ms, the values the ASL
-white paper recommends at 3 T {cite:p}`alsop2015,lu2004`.
+the values of the ASLDRO 3 T phantom {cite:p}`olivertaylor2021`
+([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)). Its gray and white matter T1
+and T2 are the averages reported at 3 T by {cite:t}`wansapura1999`; other measurements at
+3 T, such as those of {cite:t}`stanisz2005`, give longer T1 values for both tissues.
+Arterial blood, which ASL labels, has a T1 of 1.65 s, the value the ASL white paper
+recommends at 3 T {cite:p}`alsop2015` on the basis of the measurement by {cite:t}`lu2004`,
+and a T2 of 165 ms, the simulator's default; the T2 of blood depends on its oxygenation and
+hematocrit {cite:p}`zhao2007`.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -357,7 +365,8 @@ time TE the phases realign and only the T2 loss remains.
 The simulation follows several thousand spins whose frequency offsets are drawn from a
 Lorentzian distribution, which gives the static dephasing an exponential envelope with time
 constant T2′. Gray matter's own T2′ is long (377 ms), so to make the effect visible the
-simulation uses the T2′ of 20 ms found near air-filled sinuses, with gray matter's T2 of 80 ms.
+simulation uses a much shorter T2′ of 20 ms, an illustrative value that stands for a
+strongly inhomogeneous field, with gray matter's T2 of 80 ms.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -399,11 +408,13 @@ curve, at 0.607, exactly the T2 prediction. After the echo the spins dephase aga
 printed table applies the two envelopes to the simulated tissues at the reference echo time
 of 12 ms: a spin echo keeps 0.861 of gray matter's signal and 0.897 of white matter's; a
 gradient echo, with the tissues' own long T2′, keeps 0.834 and 0.797. The difference is
-modest at 12 ms in a well-shimmed field, but it grows near the sinuses and with longer TE.
+modest at 12 ms in a well-shimmed field, but it grows where the field is less uniform and
+with longer TE.
 
 The simulated readout is a spin-echo EPI (the sidecar's `AcqContrast` is `se`), so the images
 in this book are T2-weighted at 12 ms. Many clinical 2D ASL readouts use gradient-echo EPI
-and are T2*-weighted; 3D GRASE readouts are spin-echo based {cite:p}`alsop2015`. The choice
+and are T2*-weighted; 3D GRASE readouts {cite:p}`gunther2005` are spin-echo based
+{cite:p}`alsop2015`. The choice
 sets the transverse factor on the perfusion signal and the calibration image
 ([Chapter 16](../04-quantification/16-calibration.md)) and the signal loss near air–tissue
 interfaces.
@@ -443,8 +454,10 @@ print(f"label remaining at {PLD:.1f} s: in blood throughout {np.exp(-PLD / T1B):
 
 At the 1.8 s delay, a label that stayed in blood keeps 0.336; one that entered gray matter at
 0.8 s keeps 0.290 and one that entered white matter at 1.2 s keeps 0.235. The single-delay
-formula of [Chapter 14](../04-quantification/14-cbf-quantification.md) assumes the first
-case; the general kinetic model of [Chapter 5](../02-labeling/05-kinetic-model.md) accounts
+formula of the white paper {cite:p}`alsop2015`
+([Chapter 14](../04-quantification/14-cbf-quantification.md)) assumes the first
+case; the general kinetic model {cite:p}`buxton1998`
+([Chapter 5](../02-labeling/05-kinetic-model.md)) accounts
 for the second through an apparent tissue relaxation time T1′. The gap between the curves,
 about 14 % for gray matter here, is the size of that approximation. It grows when the transit
 time is short relative to the delay and vanishes when the tissue T1 equals the blood T1,
@@ -457,8 +470,9 @@ as it does.
   of the label. Delays cannot be shortened at will, because the label must first arrive; the
   balance between arrival and decay is the central trade of
   [Chapter 7](../02-labeling/07-acquisition-parameters.md).
-- **Field strength lengthens T1.** At 1.5 T the blood T1 is about 1.35 s and the label fades
-  faster; at 3 T, and more so at 7 T, more label survives the delay.
+- **Field strength lengthens T1.** The T1 of tissue and of blood grows with the field
+  {cite:p}`stanisz2005`. At 1.5 T the blood T1 is about 1.35 s {cite:p}`alsop2015` and the
+  label fades faster; at 3 T, and more so at 7 T, more label survives the delay.
 - **TR sets the static signal, not the label.** At TR 4.5 s gray matter is 3.4 % short of
   equilibrium; the M0 scan uses 8 s to be nearly saturation-free. Any scan that serves as
   $M_0$ must have its TR recorded and corrected for ([Chapter 16](../04-quantification/16-calibration.md)).
@@ -473,5 +487,5 @@ as it does.
 
 The original descriptions of nuclear induction {cite:p}`bloch1946` and the spin echo
 {cite:p}`hahn1950`; textbook treatments in {cite:t}`haacke1999` and {cite:t}`nishimura2010`;
-the T1 of blood at 3 T {cite:p}`lu2004` and the constants recommended for ASL
-{cite:p}`alsop2015`.
+tissue relaxation times at 3 T {cite:p}`wansapura1999,stanisz2005`; the T1 of blood at 3 T
+{cite:p}`lu2004` and the constants recommended for ASL {cite:p}`alsop2015`.

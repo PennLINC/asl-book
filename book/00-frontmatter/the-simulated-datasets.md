@@ -81,7 +81,7 @@ off after the kinetics: it describes the tissue and the label, not the images.
 ## The phantom
 
 The phantom is ASLDRO's `hrgt_icbm_2009a_nls_3t` digital reference object
-{cite:p}`olivertaylor2021`: the ICBM 2009a nonlinear symmetric template segmented into gray
+{cite:p}`olivertaylor2021`: the ICBM 2009a nonlinear symmetric template {cite:p}`fonov2011` segmented into gray
 matter, white matter, and CSF at 1 mm, with one value of each quantity per tissue class.
 That is the important property. A real brain has a distribution of perfusion within gray
 matter; this one has exactly 60 ml/100 g/min in every gray matter voxel, so every estimate
@@ -99,7 +99,10 @@ print(f"\narterial blood: T1 {presets.T1_BLOOD} s, T2 {1000 * presets.T2_BLOOD:.
 
 CBF is in ml/100 g/min and the transit time (ATT) in seconds; CSF is not perfused (its
 transit time is a sentinel the simulator never uses). M0 is the equilibrium magnetization in
-arbitrary units, which set the units of every image.
+arbitrary units, which set the units of every image. The $T_2$ values are the phantom's:
+gray matter 80 ms and white matter 110 ms, whereas published measurements at 3 T put gray
+matter's $T_2$ above white matter's {cite:p}`stanisz2005,wansapura1999`. Nothing in the
+book depends on the ordering.
 
 The book uses a 100 mm axial slab of the phantom, from the temporal lobes to just below the
 vertex, which 20 slices of 5 mm tile exactly. The simulator evaluates its physics on the
@@ -173,14 +176,14 @@ The compartment images are simulated on a grid twice as fine as the acquisition 
 and acquired slice by slice as a single-shot spin-echo EPI: each compartment decays with its
 own T2 and T2' along the readout (the labeled blood with the T2 of blood), the field map
 displaces the image along the phase-encode axis, k-space is truncated to the acquisition
-matrix (so edges ring), partial Fourier, Nyquist ghosts, spikes, receive coils, GRAPPA, and
-Gaussian noise are applied in k-space, and the image is reconstructed as magnitude and
+matrix (so edges ring), partial Fourier, Nyquist ghosts, spikes, receive coils, GRAPPA
+{cite:p}`griswold2002`, and Gaussian noise are applied in k-space, and the image is reconstructed as magnitude and
 phase. Head motion moves the compartment images by a rigid pose before each volume is
 acquired. This stage is the shared `mrsim-acq` library, also used by the diffusion MRI
 simulator TRXScan.
 :::
 
-The output is a BIDS ASL dataset {cite:p}`clement2022`: `part-mag` and `part-phase` images,
+The output is a BIDS ASL dataset {cite:p}`gorgolewski2016,clement2022`: `part-mag` and `part-phase` images,
 `aslcontext.tsv`, the separate M0 scan when the protocol has one, and JSON sidecars that
 repeat the protocol and add an `AslscanSimulation` block recording every value the simulator
 resolved and where it came from. [Appendix A](../appendices/a-aslscan-cookbook.md) shows the
@@ -224,7 +227,7 @@ difference reproduces the simulator's `deltam` ground truth to floating-point pr
 one simulator rather than two.
 
 **Pipeline tier.** Full aslscan runs on the slab, made offline by the repository's Snakemake
-pipeline, each a BIDS dataset with its ground truth and a provenance record.
+pipeline {cite:p}`molder2021`, each a BIDS dataset with its ground truth and a provenance record.
 [Appendix A](../appendices/a-aslscan-cookbook.md#app-a-datasets) describes every dataset and
 shows the protocol, overlay, and command behind each run.
 
@@ -277,10 +280,11 @@ shown that a real brain is built the way the phantom assumes.
   heterogeneity ([Chapter 12](../03-preprocessing/12-partial-volume.md)).
 - **No arterial compartment and no dispersion.** The kinetic model delivers the label
   straight into the tissue compartment as a sharp bolus. Real data show labeled blood still
-  in arteries at short delays, and a bolus whose edges have blurred in transit
+  in arteries at short delays {cite:p}`chappell2010`, and a bolus whose edges have blurred
+  in transit {cite:p}`hrabe2004,chappell2013`
   ([Chapter 5](../02-labeling/05-kinetic-model.md), [Chapter 19](../05-advanced/19-frontiers.md)).
 - **The label decays with the blood's T1 until it arrives, then with the tissue's.** There
-  is no exchange time and no restricted exchange
+  is no exchange time and no restricted exchange {cite:p}`stlawrence2000,parkes2002`
   ([Chapter 19](../05-advanced/19-frontiers.md)).
 - **Background suppression inverts the whole bolus.** Every pulse acts on all labeled
   blood wherever it is; real pulses cover the imaging region, so the label still in transit

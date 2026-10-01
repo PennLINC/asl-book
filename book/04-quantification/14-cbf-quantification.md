@@ -77,7 +77,8 @@ def per_slice_mean(img, roi, min_voxels=50):
 ## From the kinetic model to one formula
 
 [Chapter 5](../02-labeling/05-kinetic-model.md) gave the label-control difference of a
-(P)CASL experiment once the whole bolus has arrived (signal time $t \ge \delta + \tau$, that
+(P)CASL experiment in the general kinetic model {cite:p}`buxton1998`, once the whole bolus
+has arrived (signal time $t \ge \delta + \tau$, that
 is, $\mathrm{PLD} \ge \delta$):
 
 $$
@@ -115,8 +116,10 @@ It rests on three assumptions, and the rest of this chapter measures what each c
    absorbed into assumption 2.
 
 For pulsed labeling the arrived-phase solution with a bolus of fixed duration $\mathrm{TI}_1$
-(a QUIPSS II or Q2TIPS cut-off, [Chapter 4](../02-labeling/04-labeling-schemes.md)) gives,
-under the same $T_1' \to T_{1b}$ assumption,
+(a QUIPSS II or Q2TIPS cut-off {cite:p}`wong1998,luh1999`,
+[Chapter 4](../02-labeling/04-labeling-schemes.md)) gives, under the same
+$T_1' \to T_{1b}$ assumption, the white paper's formula for pulsed labeling
+{cite:p}`alsop2015`,
 
 $$
 \mathrm{CBF} = \frac{6000\,\lambda\,\Delta M\, e^{\mathrm{TI}/T_{1b}}}
@@ -130,8 +133,9 @@ bolus has arrived when $\mathrm{TI} \ge \delta + \mathrm{TI}_1$. The two formula
 ## Every symbol traced to the sidecar
 
 The formula needs five numbers besides the two images. Three are acquisition parameters that
-the BIDS sidecar records; two are constants that the white paper fixes and that the sidecar
-does not carry. The table lists where each comes from; the cell below prints them for the
+the BIDS sidecar records {cite:p}`clement2022`; two are constants that the white paper fixes
+{cite:p}`alsop2015`, the $T_1$ of arterial blood {cite:p}`lu2004` and the partition
+coefficient {cite:p}`herscovitch1985`, and that the sidecar does not carry. The table lists where each comes from; the cell below prints them for the
 reference dataset, including the simulator's own record of what it used
 (`AslscanSimulation.Resolved`), which a real scanner does not write.
 
@@ -177,8 +181,11 @@ tissue signal has decayed by $e^{-0.012/0.080}$ while the labeled blood in the d
 image has decayed by $e^{-0.012/0.165}$, a 7 % difference. `quant.m0_correction` divides the
 M0 scan by the recovery factor and swaps the tissue T2 decay for the blood's, with gray
 matter's T1 and T2 for every voxel; that is what the cells above applied, with TR 8 s and
-the TE of the sidecar. The white paper folds the same corrections into a scan-specific
-factor; [Chapter 16](./16-calibration.md) covers the other sources of $M_0$ (included
+the TE of the sidecar. The white paper asks for a proton-density image acquired with a
+TR long enough for full recovery, and gives the factor $1/(1-e^{-\mathrm{TR}/T_1})$, with
+the tissue $T_1$, for one acquired with a TR below about 5 s {cite:p}`alsop2015`. The
+$T_2$ swap is applied here because the simulator keeps the label in blood.
+[Chapter 16](./16-calibration.md) covers the other sources of $M_0$ (included
 volumes, the control mean, a CSF reference) and their corrections.
 
 ## See it: ΔM, M0, and CBF on the reference protocol
@@ -256,7 +263,7 @@ explained in the section on $T_1'$ below. The label in later slices has spent lo
 tissue, decaying faster than the $T_{1b}$ correction assumes, so the correction is
 incomplete by the same mechanism that biases the whole map. A 3D readout has no slice
 timing (every slice is read at once), which is one of the reasons the white paper prefers
-it {cite:p}`vidorreta2013`.
+it {cite:p}`alsop2015,vidorreta2013`.
 
 ## Measure it: CBF against the truth
 
@@ -346,8 +353,8 @@ Two things follow. First, the formula's T1 assumption is not a small correction 
 phantom: the simulator sits at one end of the physical range, a single well-mixed
 compartment with instantaneous exchange, so the cost of assuming $T_{1b}$ is as large here
 as it can be. In a living brain part of the label is still in the capillaries at the
-readout and decays with the blood's T1, which is the white paper's argument for the
-simpler formula; the truth lies between, and closer to the blood's T1 for short delays
+readout {cite:p}`stlawrence2000,parkes2002` and decays with the blood's T1, which is the
+white paper's argument for the simpler formula {cite:p}`alsop2015`; the truth lies between, and closer to the blood's T1 for short delays
 after arrival. Second, the bias is systematic and tissue-dependent, so it inflates the
 gray-to-white contrast (measured below) and it changes with the population's T1
 ([Chapter 16](./16-calibration.md) measures the sensitivity to every assumed constant).
@@ -435,7 +442,7 @@ matter estimate never exceeds 57 % of 20 ml/100 g/min, at PLD 1.0 s; gray matter
 white matter truth with this formula; the best it does is near the transit time, where the
 two biases are smallest together. This is a fair summary of single-delay white matter CBF
 in practice: it is reported as low, and it is trusted less than the gray matter value
-{cite:p}`vanosch2018`.
+{cite:p}`vanosch2009`.
 
 The maps make the same point spatially. At short delays the deep white matter and the
 territories that fill last are missing; at long delays everything is dim and noisy, because
@@ -453,7 +460,8 @@ for rn, v in zip(names, sweep_pld):
 
 The printed spread across gray matter voxels grows from PLD 2.0 s onward while the mean
 falls: the noise amplification of a long delay. The white paper's recommendation of PLD
-1.8 s in healthy adults and 2.0 s or more in the elderly and in patients is the compromise
+1.8 s in healthy adults and 2.0 s or more in the elderly and in patients
+{cite:p}`alsop2015` is the compromise
 between arrival (assumption 1) and this noise; the formula's second assumption then sets
 a bias it accepts. Where transit times are longer than the delay, a multi-delay acquisition
 ([Chapter 15](./15-multi-delay.md)) measures them instead of assuming them.
@@ -464,7 +472,8 @@ The `label-types` dataset labels the same slab with the three schemes of
 [Chapter 4](../02-labeling/04-labeling-schemes.md), at the same delay: PCASL and CASL with
 LD 1.8 s and PLD 1.8 s, PASL with TI 1.8 s and a Q2TIPS cut-off at 0.7 s. Each is quantified
 with its own formula and its own efficiency: 0.85 for PCASL, 0.68 for the amplitude-modulated
-CASL control, 0.98 for the pulsed inversion. The efficiency comes from the sidecar's
+CASL control, 0.98 for the pulsed inversion (the PCASL and PASL values are the white
+paper's {cite:p}`alsop2015`, the CASL value from {cite:p}`wang2005,wu2007`). The efficiency comes from the sidecar's
 `LabelingEfficiency`, which here equals the simulator's resolved value.
 
 ```{code-cell} python
@@ -511,8 +520,8 @@ with the data.
 ## The gray-to-white contrast
 
 The single-delay map's contrast between tissues is a familiar number: the ratio of gray to
-white matter CBF is about 3 in the phantom and in PET, and single-delay ASL reports larger
-ratios. The histogram shows why.
+white matter CBF is 3 in the phantom, PET in healthy adults puts it between 2 and 3
+{cite:p}`leenders1990`, and single-delay ASL reports larger ratios. The histogram shows why.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -556,9 +565,10 @@ one from PET or from a multi-delay fit unless both are computed the same way.
 ## Further reading
 
 The white paper {cite:p}`alsop2015` states the formula, its constants, and the recommended
-delays; the kinetic model it comes from is {cite:t}`buxton1998`. The reduced transit-time
+delays; the kinetic model it comes from is {cite:t}`buxton1998`, and its two assumed constants are
+from {cite:t}`lu2004` and {cite:t}`herscovitch1985`. The reduced transit-time
 sensitivity of a long delay is {cite:t}`alsop1996`; the pulsed bolus cut-off that makes the
 PASL formula possible is {cite:t}`wong1998` and {cite:t}`luh1999`. The 2D versus 3D readout
 question is {cite:t}`vidorreta2013`. The uncertain status of white matter ASL is discussed by
-{cite:t}`vanosch2018`, and the multi-delay recommendations that address the transit time are
+{cite:t}`vanosch2009`, and the multi-delay recommendations that address the transit time are
 {cite:t}`woods2024`.

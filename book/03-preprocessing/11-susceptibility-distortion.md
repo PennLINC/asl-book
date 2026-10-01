@@ -73,8 +73,8 @@ susceptibilities, and near the interfaces between them the field deviates from i
 value by up to a hundred hertz or more at 3 T. Spins there precess at a shifted frequency
 $\Delta f$.
 
-ASL images are read out with echo-planar imaging, one whole slice per excitation
-([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). Along the frequency-encode
+ASL images are read out with echo-planar imaging {cite:p}`mansfield1977`, one whole slice
+per excitation ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). Along the frequency-encode
 axis, position is read from the frequency within one line, which takes well under a
 millisecond, and a frequency offset moves signal by a small fraction of a voxel. Along the
 **phase-encode** axis, position is inferred from how much phase a spin accumulates from one
@@ -87,7 +87,8 @@ displacement of
 $$\Delta y\ (\text{voxels}) = \Delta f \cdot t_\mathrm{esp} \cdot N = \Delta f \cdot \text{TotalReadoutTime},$$
 
 because a spin whose phase advances by one full turn over the readout is reconstructed one
-voxel away {cite:p}`jezzard1995`. `TotalReadoutTime` in the BIDS sidecar is defined as the
+voxel away {cite:p}`jezzard1995`. `TotalReadoutTime` in the BIDS sidecar
+{cite:p}`gorgolewski2016` is defined as the
 effective echo spacing times the number of reconstructed phase-encode lines less one, so
 the product gives the shift directly in voxels of the reconstructed image; in-plane
 acceleration shortens it, partial Fourier does not. Multiply by the voxel size for
@@ -299,8 +300,9 @@ the same way the field did and doubles the displacement: 970 units, worse than n
 
 When no field map was acquired, the pair itself supplies the field. The two images are the
 same anatomy displaced by $d$ and by $-d$, so the displacement that unwarps one onto the
-other is $2d$, and the field follows {cite:p}`andersson2003`. FSL's `topup` solves for a
-smooth three-dimensional field that makes the two corrected images agree; the version
+other is $2d$, and the field follows {cite:p}`andersson2003`. `topup`, the implementation
+of that method in FSL {cite:p}`smith2004`, solves for a smooth three-dimensional field that
+makes the two corrected images agree; the version
 below is one column at a time. The displacement along a column is written as a sum of nine
 smooth bumps, and the nine weights are chosen so that the `ap` column unwarped by $d$ and
 the `pa` column unwarped by $-d$ agree as closely as possible, with a small penalty on
@@ -428,16 +430,18 @@ correction into the full pipeline for this reason.
 - **Shorten the readout.** The displacement is proportional to `TotalReadoutTime`, so
   in-plane acceleration reduces it directly, at a cost in SNR that ASL feels more than most
   sequences ([Chapter 7](../02-labeling/07-acquisition-parameters.md)); partial Fourier
-  shortens the echo time but not the displacement. 3D readouts such as GRASE and
-  stack-of-spirals distort differently and usually less along the slow axis, which is one of
-  the reasons the white paper prefers them {cite:p}`alsop2015`.
+  shortens the echo time but not the displacement. 3D readouts such as GRASE
+  {cite:p}`gunther2005` and stack-of-spirals distort differently and usually less along the
+  slow axis, which is one of the reasons the white paper prefers them {cite:p}`alsop2015`.
 - **Acquire the reversed polarity.** A few volumes with the blips reversed, or the M0 scan
   in both polarities, are enough to estimate the field; the ASL series is then corrected
   from its one polarity. A gradient-echo field map serves the same purpose if it is
   registered to the EPI.
-- **Record the metadata.** `PhaseEncodingDirection` and `TotalReadoutTime` are what every
-  correction reads, and ASL-BIDS requires them {cite:p}`clement2022`; a reoriented image
-  with a stale sidecar doubles the distortion, as the wrong-sign panel shows.
+- **Record the metadata.** `PhaseEncodingDirection` and `TotalReadoutTime` are the two
+  fields a distortion correction reads. BIDS requires them when a field-map-based
+  correction is intended {cite:p}`gorgolewski2016,clement2022`, and aslscan requires them
+  to simulate the distortion; a reoriented image with a stale sidecar doubles the
+  distortion, as the wrong-sign panel shows.
 - **Look at the inferior slices.** The artifact lives above the sinuses and beside the
   petrous bones; a check of the frontal and temporal gray matter against the outline of the
   anatomical image, at the lowest slices, catches it.
@@ -447,6 +451,7 @@ correction into the full pipeline for this reason.
 ## Further reading
 
 Field-map-based correction {cite:p}`jezzard1995`; the reversed-polarity estimate of the
-field {cite:p}`andersson2003`; the metadata ASL-BIDS records for it {cite:p}`clement2022`;
-the ASLPrep pipeline, which applies these corrections through SDCFlows
-{cite:p}`adebimpe2022`; the white paper's discussion of readouts {cite:p}`alsop2015`.
+field {cite:p}`andersson2003`; the metadata BIDS records for it {cite:p}`gorgolewski2016,clement2022`;
+the ASLPrep pipeline {cite:p}`adebimpe2022`, which applies these corrections through
+SDCFlows, the distortion-correction workflows that grew out of fMRIPrep
+{cite:p}`esteban2019`; the white paper's discussion of readouts {cite:p}`alsop2015`.

@@ -67,12 +67,14 @@ the arriving phase and their CBF is underestimated
 factor $e^{-1/T_1'}$, about 0.47 in gray matter, of signal for no gain in accuracy. The
 white paper's recommendations for PCASL at 3 T are a delay of 1.8 s for healthy adults
 under 70, 2.0 s for older adults, 1.5 s for children, and 2.0 s or more for patients with
-vascular disease, whose transit times are the longest and least predictable.
+vascular disease, whose transit times are the longest and least predictable
+{cite:p}`alsop2015`. Where the transit time varies that much, the later recommendations
+describe acquisitions at several delays, which account for it {cite:p}`woods2024`.
 
 The labeling duration $\tau$ sets how much label is delivered. The signal in the arrived
 phase grows as $1 - e^{-\tau/T_1'}$, so 1.8 s of labeling captures three quarters of the
 signal an infinitely long label would give, and 3 s about 90 %. The white paper recommends
-1.8 s. Longer labeling raises the signal but also the TR, since the label and the delay
+1.8 s {cite:p}`alsop2015`. Longer labeling raises the signal but also the TR, since the label and the delay
 are both dead time before the readout, and it heats the tissue at the labeling plane (the
 specific absorption rate, SAR, of the pulse train).
 
@@ -306,8 +308,8 @@ the SNR scales with the voxel volume: a 2.5 mm in-plane voxel has 0.51 times the
 a 3.5 mm one and half its SNR, and a 5 mm voxel has twice. The trade is partial volume:
 a 3.5 × 3.5 × 5 mm voxel at the cortex mixes gray matter, white matter, and CSF, and its
 measured CBF is the mixture's ([Chapter 12](../03-preprocessing/12-partial-volume.md)).
-The white paper recommends 3 to 4 mm in-plane and 4 to 8 mm slices for this reason: ASL is
-signal-starved, and the anatomy it resolves is coarse.
+The white paper recommends 3 to 4 mm in-plane and 4 to 8 mm slices for this reason
+{cite:p}`alsop2015`: ASL is signal-starved, and the anatomy it resolves is coarse.
 
 The `voxel-sweep` dataset holds the reference protocol at 2.5, 3.5, and 5 mm in-plane
 voxels (matrices 80 × 96, 64 × 68, and 40 × 48, slices 5 mm throughout), with the image
@@ -349,8 +351,10 @@ pure-tissue perfusion.
 
 ## Echo time
 
-The labeled water in the voxel is blood, whose $T_2$ at 3 T is about 165 ms, while gray
-matter's is 80 ms and white matter's 110 ms ([Chapter 1](../01-mri-physics/01-spins-and-relaxation.md)).
+The labeled water in the voxel is blood, whose $T_2$ the simulator takes as 165 ms at 3 T
+(the measured value depends on oxygenation and hematocrit, {cite:p}`zhao2007`), while gray
+matter's is 80 ms and white matter's 110 ms {cite:p}`wansapura1999`
+([Chapter 1](../01-mri-physics/01-spins-and-relaxation.md)).
 Between excitation and the echo the difference signal decays as $e^{-\mathrm{TE}/T_{2b}}$ and
 the static tissue as $e^{-\mathrm{TE}/T_2}$. Two consequences: a short TE keeps more of both,
 and the ratio of the difference to the tissue signal, which the calibration of
@@ -425,10 +429,11 @@ cannot be optimal for every slice ([Chapter 9](../03-preprocessing/09-background
 A 3D readout excites the whole slab and reads it in one shot or a few segments, so every
 voxel shares one delay, the SNR is higher (the whole volume contributes to each readout),
 and background suppression can null the tissue for the entire volume at once. The white
-paper recommends 3D readouts for these reasons, with 3D GRASE
-{cite:p}`gunther2005,fernandezseara2005` and stack-of-spirals as the usual choices; segmented 3D readouts
-with background suppression were shown to give the best SNR per unit time in a systematic
-comparison {cite:p}`vidorreta2013`. The costs are blurring along the slice direction, because
+paper recommends segmented 3D readouts for these reasons, either 3D GRASE
+{cite:p}`gunther2005,fernandezseara2005` or a 3D stack of spirals {cite:p}`alsop2015`; in a
+direct comparison of single-shot readouts the 3D ones had about twice the spatial SNR of
+2D EPI, and background suppression tripled their temporal SNR {cite:p}`vidorreta2013`.
+The costs are blurring along the slice direction, because
 the long echo train decays with $T_2$ across the k-space partitions, and a longer TR when
 the readout is segmented. The simulator does not model 3D readouts, so this book's images
 are 2D throughout; where a result depends on the choice (slice timing, background suppression
@@ -438,22 +443,24 @@ efficiency), the chapter says so.
 
 **Background suppression** adds inversion pulses between labeling and readout, timed so
 that the static tissue is near zero when the image is read while the label, inverted along
-with it, keeps its magnitude. The difference signal is unchanged (apart from a few percent
-lost per pulse), but the fluctuations that scale with the static signal, from motion and
-physiology, are suppressed with it. The white paper recommends it for every ASL protocol.
+with it, keeps its magnitude {cite:p}`dixon1991,ye2000`. The difference signal is unchanged
+(apart from a few percent lost per pulse, {cite:p}`garcia2005`), but the fluctuations that
+scale with the static signal, from motion and physiology, are suppressed with it. The white
+paper recommends it for every ASL protocol {cite:p}`alsop2015`.
 Its cost is that the suppressed series cannot serve as its own M0 image and that a 2D readout
 sees each slice at a different point of the tissue's recovery.
 [Chapter 9](../03-preprocessing/09-background-suppression.md) simulates the pulses and
 measures what they buy.
 
-**The M0 scan** calibrates the difference signal to blood magnetization. It needs a long TR
+**The M0 scan** calibrates the difference signal to blood magnetization
+{cite:p}`alsop2015`. It needs a long TR
 (the reference uses 8 s, so that even CSF recovers), the same readout and TE as the ASL
 series, and no background suppression. It takes a few seconds and it is the most commonly
 omitted part of an ASL protocol; without it CBF can only be estimated from the control
 images with a saturation correction ([Chapter 16](../04-quantification/16-calibration.md)).
 
-**Field strength** enters twice. The equilibrium magnetization, and so the raw SNR, grows
-about linearly with $B_0$, and the blood $T_1$ is longer at 3 T (1.65 s, {cite:p}`lu2004`)
+**Field strength** enters twice {cite:p}`alsop2015`. The intrinsic SNR is higher at the
+higher field, and the blood $T_1$ is longer at 3 T (1.65 s, {cite:p}`lu2004`)
 than at 1.5 T (about 1.35 s, the white paper's value), so more label survives the transit
 and the delay. The figure shows the gray matter curve with each $T_{1b}$.
 
@@ -473,9 +480,12 @@ print(f"GM at the reference timing: T1b 1.65 s gives {r_t1:.2f} x the difference
       f"with the 2 x higher magnetization at 3 T, about {2 * r_t1:.1f} x the SNR of 1.5 T")
 ```
 
-At the reference timing the longer blood $T_1$ alone gives 1.1 times the signal, and with the
-doubled magnetization, about 2.2 times the SNR of the same protocol at 1.5 T: an ASL
-protocol that takes 5 min at 3 T would need about 25 min at 1.5 T for the same result. This, more than any other factor, is why ASL became routine only with 3 T scanners.
+At the reference timing the longer blood $T_1$ alone gives 1.1 times the signal. If the
+equilibrium magnetization doubles with the field and the noise stays the same, that makes
+about 2.2 times the SNR of the same protocol at 1.5 T: an ASL
+protocol that takes 5 min at 3 T would then need about 25 min at 1.5 T for the same result.
+The white paper recommends 3 T when it is available, and a lower spatial resolution at
+1.5 T to make up the difference {cite:p}`alsop2015`.
 The costs of 3 T, larger susceptibility offsets and higher SAR from the labeling train,
 are the subjects of [Chapter 11](../03-preprocessing/11-susceptibility-distortion.md) and of
 the labeling-duration limits above.
@@ -552,6 +562,9 @@ background suppression and a 3D readout rather than more pairs.
 
 The white paper's protocol recommendations {cite:p}`alsop2015` and their update for
 multi-timepoint acquisitions {cite:p}`woods2024`; the readout comparison of
-{cite:t}`vidorreta2013`; 3D GRASE for ASL {cite:p}`gunther2005,fernandezseara2005`; the
-blood $T_1$ at 3 T {cite:p}`lu2004`; the PCASL labeling scheme and its efficiency
+{cite:t}`vidorreta2013`; 3D GRASE for ASL {cite:p}`gunther2005,fernandezseara2005`;
+background suppression {cite:p}`dixon1991,ye2000` and what its pulses cost the label
+{cite:p}`garcia2005`; the
+blood $T_1$ at 3 T {cite:p}`lu2004` and its $T_2$ {cite:p}`zhao2007`; tissue relaxation
+times at 3 T {cite:p}`wansapura1999`; the PCASL labeling scheme and its efficiency
 {cite:p}`dai2008`.
