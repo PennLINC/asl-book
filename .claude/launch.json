@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "book-static",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-lc", "cd /mnt/c/Users/tsalo/Documents/linc/asl-book/_build/html && python3 -m http.server 8766"],
+      "port": 8766
+    },
+    {
+      "name": "book-live",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-lc", "cd /mnt/c/Users/tsalo/Documents/linc/asl-book && ASLBOOK_DATA=/mnt/c/Users/tsalo/Documents/linc/asl-book/data OMP_NUM_THREADS=1 /home/tsalo/.local/bin/micromamba run -n aslbook myst start --execute --port 3001"],
+      "port": 3001
+    }
+  ]
+}

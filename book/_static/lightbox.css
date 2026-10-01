@@ -1,0 +1,23 @@
+/* Click-to-enlarge images. Injected into every built page by tools/inject_static.py. */
+main img {
+  cursor: zoom-in;
+}
+#dwibook-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(10, 10, 10, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#dwibook-lightbox img {
+  max-width: 96vw;
+  max-height: 96vh;
+  width: auto;
+  height: auto;
+  background: white;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  cursor: zoom-out;
+}

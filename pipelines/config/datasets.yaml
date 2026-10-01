@@ -1,0 +1,180 @@
+# Datasets the book depends on (ids match aslbook.data.load_dataset and Appendix A).
+# Every pipeline run reads its parameters from here, and Appendix A (cookbook) and B (manifest)
+# are rendered from the same file, so the three cannot drift. Schema: aslbook.cookbook.
+
+# Pinned tools. The commits are recorded in every dataset's provenance.json.
+tools:
+  aslscan_repo: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan
+  aslscan_bin: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan/target/release/aslscan
+  aslscan_commit: "5812074"
+  mrsim_acq_repo: /mnt/c/Users/tsalo/Documents/rust-trx/mrsim-acq
+  mrsim_acq_commit: "8de83ba"
+
+# The phantom: ASLDRO's hrgt_icbm_2009a_nls_3t (1 mm, one constant per tissue), converted by
+# aslscan's tools/hrgt_to_bids.py, cropped by pipelines/scripts/prepare_phantom.py to a 100 mm
+# axial slab (z 45:145 of the 189 mm volume, from the temporal lobes to just below the vertex)
+# so that 20 slices of 5 mm tile it exactly. `slab-fieldmap` adds a synthetic B0 field map
+# (Hz) with positive lobes above the frontal sinuses and negative lobes at the temporal bones.
+phantoms:
+  slab:
+    source: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan/work/phantom-3t
+    crop: [[0, 197], [0, 233], [45, 145]]
+    dir: data/_work/phantoms/slab
+    fieldmap: false
+  slab-fieldmap:
+    source: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan/work/phantom-3t
+    crop: [[0, 197], [0, 233], [45, 145]]
+    dir: data/_work/phantoms/slab-fieldmap
+    fieldmap: true
+
+# Settings shared by every run unless a dataset overrides them. The protocol is the book's
+# reference 2D PCASL (aslbook.presets.REFERENCE): LD 1.8 s, PLD 1.8 s, TR 4.5 s, TE 12 ms,
+# 3.5 x 3.5 x 5 mm, 20 slices 40 ms apart, 30 pairs, a separate M0 scan at TR 8 s. The noise
+# variance 1600 (sigma 40 in image units) gives the gray matter control image an SNR near 150.
+defaults:
+  phantom: slab
+  seed: 1
+  protocol: { type: pcasl }
+  overlay:
+    acquisition: { oversample: 2, matrix: [64, 68], noise_variance: 1600 }
+    m0: { repetition_time: 8.0 }
+
+datasets:
+  ref-pcasl:
+    description: >-
+      the reference: the book's 2D PCASL protocol on the slab with the standard noise, no
+      background suppression, no motion, no field map; the series every chapter compares against
+    chapters: [0, 2, 6, 8, 12, 13, 14, 16, 17]
+    run: pcasl
+  ref-clean:
+    description: >-
+      the reference protocol with the noise switched off: the noise-free control, label and M0
+      images, whose subtraction equals the simulator's deltam ground truth up to the readout
+    chapters: [5, 6, 8, 12, 14]
+    run: pcasl
+    overlay:
+      acquisition: { noise_variance: 0 }
+  label-types:
+    description: >-
+      the three labeling schemes on the same slab and timing: PCASL (efficiency 0.85), CASL
+      (efficiency 0.68, the amplitude-modulated control's), and PASL with a Q2TIPS bolus cut-off
+      at 0.7 s and an inversion time of 1.8 s (efficiency 0.98)
+    chapters: [4, 5, 14]
+    variants:
+      - { name: pcasl }
+      - { name: casl, protocol: { label_type: CASL }, overlay: { kinetic: { label_efficiency: 0.68 } } }
+      - { name: pasl, protocol: { type: pasl, ti: 1.8, cutoff: 0.7 } }
+  pld-sweep:
+    description: >-
+      single-delay PCASL at six post-labeling delays from 0.5 to 3.0 s (15 pairs each, TR 6 s so
+      that the longest delay fits): the kinetic curve sampled by whole acquisitions, and what a
+      single-delay quantification gets wrong when the delay is shorter than the transit time
+    chapters: [5, 7, 14, 15]
+    protocol: { n_pairs: 15, tr: 6.0 }
+    sweep: { key: protocol.pld, values: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0], labels: [pld05, pld10, pld15, pld20, pld25, pld30] }
+  multi-pld:
+    description: >-
+      one multi-delay PCASL series: five pairs at each of six delays from 0.5 to 3.0 s in one
+      acquisition (60 volumes, TR 6 s), from which CBF and the arterial transit time are fitted
+    chapters: [15, 17]
+    run: multipld
+    protocol: { type: multi_pld, plds: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0], pairs_per_pld: 5, tr: 6.0 }
+  noise-sweep:
+    description: >-
+      the reference protocol at three noise levels (sigma 10, 40, 80 in image units, i.e. gray
+      matter SNR about 600, 150, 75), plus one run with eight receive coils and GRAPPA 2, whose
+      magnitude noise is non-central chi rather than Rician
+    chapters: [8]
+    protocol: { n_pairs: 30 }
+    sweep: { key: overlay.acquisition.noise_variance, values: [100, 1600, 6400], labels: [sigma10, sigma40, sigma80] }
+    variants:
+      - { name: coils8-r2, protocol: { extra: { ParallelReductionFactorInPlane: 2 } }, overlay: { acquisition: { n_coils: 8 } } }
+  bgsup:
+    description: >-
+      background suppression: the reference protocol without pulses, with two inversion pulses
+      timed so that gray and white matter pass through zero early in the 0.76 s readout (efficiency 0.95), the
+      same with perfect pulses (efficiency 1), and with a presaturation pulse added
+    chapters: [9, 10]
+    variants:
+      - { name: "off" }
+      - { name: "on", protocol: { background_suppression: [2.25, 3.50] } }
+      - { name: perfect, protocol: { background_suppression: [2.25, 3.50] }, overlay: { background_suppression: { inversion_efficiency: 1.0 } } }
+      - { name: presat, protocol: { background_suppression: [2.25, 3.50] }, overlay: { background_suppression: { presaturation: true } } }
+  motion:
+    description: >-
+      head motion: random impulses of up to 2 mm and 2 degrees on six volumes of the reference
+      series (labels 5 and 27 move while their controls are still; volumes 12 and 13, and 40 and
+      41, move as whole pairs), and a linear drift of up to 3 mm and 1 degree over the whole
+      series; the random case also with background suppression
+    chapters: [10]
+    variants:
+      - { name: random, overlay: { motion: { mode: random, trans_mm: [2.0, 2.0, 1.0], rot_deg: [1.0, 1.0, 2.0], volumes: [5, 12, 13, 27, 40, 41] } } }
+      - { name: drift, overlay: { motion: { mode: linear, trans_mm: [3.0, 1.0, 0.5], rot_deg: [0.5, 0.5, 1.0] } } }
+      - { name: random-bgsup, protocol: { background_suppression: [2.25, 3.50] }, overlay: { motion: { mode: random, trans_mm: [2.0, 2.0, 1.0], rot_deg: [1.0, 1.0, 2.0], volumes: [5, 12, 13, 27, 40, 41] } } }
+  sdc:
+    description: >-
+      susceptibility distortion: the slab with its synthetic field map acquired with the phase
+      encoding posterior-anterior (j-) and reversed (j), at an echo time of 20 ms and a total readout time of 35 ms so that
+      the largest field offsets move the image by three to four voxels, plus the same protocol on
+      the slab without a field map as the undistorted reference
+    chapters: [11, 13]
+    protocol: { n_pairs: 15, te: 0.020, extra: { TotalReadoutTime: 0.035 } }
+    variants:
+      - { name: ap, phantom: slab-fieldmap, protocol: { pe: "j-" } }
+      - { name: pa, phantom: slab-fieldmap, protocol: { pe: "j" } }
+      - { name: undistorted, phantom: slab, protocol: { pe: "j-" } }
+  voxel-sweep:
+    description: >-
+      the reference protocol at 2.5, 3.5 and 5 mm in-plane voxels (slices stay 5 mm); the image
+      noise standard deviation is scaled inversely with the voxel volume (sigma 78, 40, 20), as
+      thermal noise per voxel behaves at a fixed bandwidth, so that both the signal-to-noise ratio
+      and the partial-volume mixing change with voxel size
+    chapters: [7, 12]
+    protocol: { n_pairs: 15 }
+    variants:
+      - { name: vox25, protocol: { voxel_mm: [2.5, 2.5, 5.0] }, overlay: { acquisition: { matrix: [80, 96], noise_variance: 6147 } } }
+      - { name: vox35 }
+      - { name: vox50, protocol: { voxel_mm: [5.0, 5.0, 5.0] }, overlay: { acquisition: { matrix: [40, 48], noise_variance: 384 } } }
+  m0-types:
+    description: >-
+      the calibration image: a separate M0 scan at TR 8 s (the reference), a separate M0 scan at
+      TR 2 s (saturated), and m0scan volumes included in the series at the series' own TR
+    chapters: [16]
+    protocol: { n_pairs: 15 }
+    variants:
+      - { name: separate-tr8 }
+      - { name: separate-tr2, overlay: { m0: { repetition_time: 2.0 } } }
+      - { name: included, protocol: { m0_type: Included, m0_rows: 2 } }
+  te-sweep:
+    description: >-
+      the reference protocol at echo times of 12, 30 and 60 ms: the labeled blood decays with its
+      own T2 during the readout, the tissue with the tissue's, so the calibration ratio drifts with
+      the echo time
+    chapters: [7, 16]
+    protocol: { n_pairs: 15 }
+    sweep: { key: protocol.te, values: [0.012, 0.030, 0.060], labels: [te12, te30, te60] }
+  readout:
+    description: >-
+      three readout imperfections on the reference protocol, one per run: partial Fourier 6/8,
+      a Nyquist ghost of 5 percent, and two k-space spikes per slice
+    chapters: [13]
+    protocol: { n_pairs: 15 }
+    variants:
+      - { name: pf68, overlay: { acquisition: { partial_fourier: 0.75 } } }
+      - { name: ghost, overlay: { acquisition: { ghost_offset: 0.05 } } }
+      - { name: spikes, overlay: { acquisition: { n_spikes: 2, spike_amplitude: 4.0 } } }
+  kitchen-sink:
+    description: >-
+      everything at once on the slab with the field map: noise, eight coils with GRAPPA 2,
+      partial Fourier 6/8, a faint ghost, background suppression, random head motion, and a
+      reversed-polarity partner acquired with the same motion (same seed) for distortion
+      correction
+    chapters: [13]
+    phantom: slab-fieldmap
+    protocol: { te: 0.020, background_suppression: [2.25, 3.50], extra: { TotalReadoutTime: 0.035, ParallelReductionFactorInPlane: 2 } }
+    overlay:
+      acquisition: { n_coils: 8, partial_fourier: 0.75, ghost_offset: 0.02 }
+      motion: { mode: random, trans_mm: [2.0, 2.0, 1.0], rot_deg: [1.0, 1.0, 2.0], volumes: [5, 12, 13, 27, 40, 41] }
+    variants:
+      - { name: ap, protocol: { pe: "j-" } }
+      - { name: pa, protocol: { pe: "j" } }

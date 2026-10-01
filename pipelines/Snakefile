@@ -1,0 +1,47 @@
+# Offline data pipeline for the ASL book. Runs in WSL, never at book build time.
+#
+#   cd pipelines
+#   micromamba run -n aslbook snakemake -c 4 ref-pcasl        # one dataset
+#   micromamba run -n aslbook snakemake -c 4 --until all       # everything
+#
+# Outputs land in ../data/<dataset-id>/ (gitignored). Point the book at them with
+#   ASLBOOK_DATA=$(pwd)/../data myst build --html --execute
+# and publish them with scripts/package_release.py once they are final.
+
+from pathlib import Path
+
+configfile: "config/datasets.yaml"
+
+DATA = Path("../data")
+DATASETS = list(config["datasets"])
+PHANTOM_DIRS = [Path("..") / p["dir"] for p in config["phantoms"].values()]
+
+
+rule all:
+    input:
+        expand(str(DATA / "{ds}" / "provenance.json"), ds=DATASETS),
+
+
+# Crop the source phantom to the slab (and add the synthetic field map); package the toy slab.
+rule phantoms:
+    output:
+        [str(d / "dseg.nii.gz") for d in PHANTOM_DIRS],
+        "../aslbook/data/phantom_slab.npz",
+    shell:
+        "python scripts/prepare_phantom.py --config config/datasets.yaml --package"
+
+
+# One dataset: every run of its entry, then the provenance file.
+rule simulate:
+    input:
+        rules.phantoms.output,
+    output:
+        str(DATA / "{ds}" / "provenance.json"),
+    shell:
+        "python scripts/run_dataset.py --config config/datasets.yaml --dataset {wildcards.ds} --data-root ../data"
+
+
+for ds in DATASETS:
+    rule:
+        name: ds
+        input: str(DATA / ds / "provenance.json")

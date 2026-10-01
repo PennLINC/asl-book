@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aslbook"
+version = "0.1.0.dev0"
+description = "Helper package for the arterial spin labeling executable book: data loading, the kinetic model, toy simulators, quantification, plotting conventions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Taylor Salo", email = "tsalo90@gmail.com" }]
+dependencies = [
+    "numpy",
+    "scipy",
+    "nibabel",
+    "matplotlib",
+    "pandas",
+    "scikit-image",
+    "pooch",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["aslbook*"]
+
+[tool.setuptools.package-data]
+aslbook = ["registry.txt", "data/*.npz", "data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["aslbook/tests"]
+addopts = "-q"

@@ -1,0 +1,76 @@
+# Jupyter Book 2 / mystmd configuration. Docs: https://mystmd.org/guide/frontmatter
+version: 1
+project:
+  id: aslbook
+  title: Arterial spin labeling, executed
+  description: >-
+    An executable book on arterial spin labeling MRI: the physics of labeling blood, the
+    kinetic model, acquisition choices, artifacts and preprocessing, and quantification, with
+    every figure regenerated from code and every perfusion estimate scored against the ground
+    truth of a simulated brain.
+  keywords: [arterial spin labeling, ASL, perfusion MRI, CBF, PCASL, PASL, simulation, aslscan]
+  authors:
+    - name: Taylor Salo
+      email: tsalo90@gmail.com
+  github: https://github.com/PennLINC/asl-book
+  license:
+    content: CC-BY-4.0
+    code: MIT
+  bibliography:
+    - book/references.bib
+  # Planning docs and code are not book content.
+  exclude:
+    - docs/**
+    - aslbook/**
+    - pipelines/**
+    - README.md
+  toc:
+    - file: book/index.md
+    - title: Front matter
+      children:
+        - file: book/00-frontmatter/how-to-read.md
+        - file: book/00-frontmatter/the-simulated-datasets.md
+        - file: book/00-frontmatter/notation.md
+    - title: "Part I: MRI physics for perfusion imaging"
+      children:
+        - file: book/01-mri-physics/01-spins-and-relaxation.md
+        - file: book/01-mri-physics/02-epi-and-reconstruction.md
+    - title: "Part II: Perfusion and its labeling"
+      children:
+        - file: book/02-labeling/03-perfusion-and-tracers.md
+        - file: book/02-labeling/04-labeling-schemes.md
+        - file: book/02-labeling/05-kinetic-model.md
+        - file: book/02-labeling/06-the-asl-signal.md
+        - file: book/02-labeling/07-acquisition-parameters.md
+    - title: "Part III: Artifacts and preprocessing"
+      children:
+        - file: book/03-preprocessing/08-noise.md
+        - file: book/03-preprocessing/09-background-suppression.md
+        - file: book/03-preprocessing/10-motion.md
+        - file: book/03-preprocessing/11-susceptibility-distortion.md
+        - file: book/03-preprocessing/12-partial-volume.md
+        - file: book/03-preprocessing/13-assembled-pipeline.md
+    - title: "Part IV: Quantification"
+      children:
+        - file: book/04-quantification/14-cbf-quantification.md
+        - file: book/04-quantification/15-multi-delay.md
+        - file: book/04-quantification/16-calibration.md
+        - file: book/04-quantification/17-what-your-data-allow.md
+    - title: "Part V: Advanced acquisitions"
+      children:
+        - file: book/05-advanced/18-time-encoded-and-look-locker.md
+        - file: book/05-advanced/19-frontiers.md
+    - title: Appendices
+      children:
+        - file: book/appendices/a-aslscan-cookbook.md
+        - file: book/appendices/b-data-manifest.md
+        - file: book/appendices/c-software-environment.md
+        - file: book/appendices/d-glossary.md
+        - file: book/appendices/e-truth-map-catalogue.md
+site:
+  template: book-theme
+  options:
+    folders: true
+  # Click-to-enlarge images: the theme has no lightbox and does not execute scripts placed
+  # in its content slots, so tools/inject_static.py adds book/_static/lightbox.{css,js} to
+  # every built page after `myst build` (see the build script and the CI workflow).

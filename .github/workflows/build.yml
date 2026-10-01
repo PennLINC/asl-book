@@ -1,0 +1,76 @@
+name: Build book
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The GitHub Pages site lives under /<repo>/, which mystmd needs to know at build time.
+  BASE_URL: /${{ github.event.repository.name }}
+  # Notebooks execute in parallel; one BLAS thread per kernel avoids oversubscription.
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+
+      - name: Install aslbook
+        shell: bash -l {0}
+        run: pip install -e ".[test]"
+
+      - name: Unit tests
+        shell: bash -l {0}
+        run: pytest
+
+      - name: Restore execution and data caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build/execute
+            ~/.cache/aslbook
+          key: execute-${{ hashFiles('aslbook/registry.txt', 'book/**/*.md', 'aslbook/**/*.py') }}
+          restore-keys: |
+            execute-
+
+      - name: Build book
+        shell: bash -l {0}
+        run: myst build --html --execute --ci
+
+      - name: Add click-to-enlarge images
+        shell: bash -l {0}
+        run: python tools/inject_static.py _build/html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _build/html
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

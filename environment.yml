@@ -1,0 +1,26 @@
+# The aslbook environment (WSL side). Create with:
+#   micromamba create -n aslbook -f environment.yml
+#   micromamba run -n aslbook pip install -e ".[test]"
+name: aslbook
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - nibabel
+  - matplotlib
+  - pandas
+  - scikit-image
+  - pillow
+  - pooch
+  - pyyaml
+  - ipykernel
+  - jupyterlab
+  - jupytext
+  - pytest
+  # book engine (Jupyter Book 2)
+  - nodejs>=20
+  - pip:
+      - mystmd            # jupyter-book 2 engine
+      - snakemake         # offline pipeline driver (runs in WSL; calls aslscan)
