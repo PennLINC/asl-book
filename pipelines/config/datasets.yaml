@@ -6,9 +6,9 @@
 tools:
   aslscan_repo: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan
   aslscan_bin: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan/target/release/aslscan
-  aslscan_commit: "5812074"
+  aslscan_commit: "6da6ca2"
   mrsim_acq_repo: /mnt/c/Users/tsalo/Documents/rust-trx/mrsim-acq
-  mrsim_acq_commit: "8de83ba"
+  mrsim_acq_commit: "17f3fb9"
 
 # The phantom: ASLDRO's hrgt_icbm_2009a_nls_3t (1 mm, one constant per tissue), converted by
 # aslscan's tools/hrgt_to_bids.py, cropped by pipelines/scripts/prepare_phantom.py to a 100 mm
@@ -94,13 +94,18 @@ datasets:
     description: >-
       background suppression: the reference protocol without pulses, with two inversion pulses
       timed so that gray and white matter pass through zero early in the 0.76 s readout (efficiency 0.95), the
-      same with perfect pulses (efficiency 1), and with a presaturation pulse added
+      same with perfect pulses (efficiency 1), and with a presaturation pulse added; then the same
+      pulses under the simulator's bolus-position model, in which a pulse inverts only the label
+      already inside the imaging slab (entered 0.3 s after labeling), and that model with the
+      first pulse moved to 2.0 s, just after labeling ends, so that the last parcels of the bolus miss it
     chapters: [9, 10]
     variants:
       - { name: "off" }
       - { name: "on", protocol: { background_suppression: [2.25, 3.50] } }
       - { name: perfect, protocol: { background_suppression: [2.25, 3.50] }, overlay: { background_suppression: { inversion_efficiency: 1.0 } } }
       - { name: presat, protocol: { background_suppression: [2.25, 3.50] }, overlay: { background_suppression: { presaturation: true } } }
+      - { name: on-slab, protocol: { background_suppression: [2.25, 3.50] }, overlay: { background_suppression: { model: bolus-position, pulse_region: slab, slab_entry_time: 0.3 } } }
+      - { name: early-slab, protocol: { background_suppression: [2.00, 3.45] }, overlay: { background_suppression: { model: bolus-position, pulse_region: slab, slab_entry_time: 0.3 } } }
   motion:
     description: >-
       head motion: random impulses of up to 2 mm and 2 degrees on six volumes of the reference
@@ -179,3 +184,95 @@ datasets:
     variants:
       - { name: ap, protocol: { pe: "j-" } }
       - { name: pa, protocol: { pe: "j" } }
+
+  # ---- the acquisitions aslscan gained after the first data release: 3D readouts, physiological
+  # noise, time encoding, Look-Locker, multi-echo, and the vascular extensions
+  readout-3d:
+    description: >-
+      the 3D readouts the white paper recommends, on the reference protocol's labeling and timing
+      (15 pairs): 3D GRASE in one shot (every echo of a 20-echo train reads all 68 phase-encode
+      lines, 180-degree refocusing), in four interleaved shots of 17 lines per echo (a 10 ms echo
+      spacing), the four-shot train with 130-degree refocusing, and a stack of spirals (eight 5 ms
+      interleaves on a 68 x 68 matrix, one per shot); then the four-shot GRASE and the spiral
+      each with background suppression (two pulses at 1.90 and 3.25 s, retimed for the slab's
+      single excitation at 3.6 s), each on the slab with the field map, the four-shot GRASE with
+      physiological noise and with motion events between its shots (a dropout rate of 0.08 per
+      shot, so about a quarter of the volumes have one)
+    chapters: [2, 7, 9, 10, 11, 13]
+    protocol: { n_pairs: 15 }
+    variants:
+      - { name: grase-1shot, protocol: { type: grase, n_shots: 1, te: 0.0224 }, overlay: { readout: { ky_segments: 1, line_spacing: 0.3 } } }
+      - { name: grase-4shot, protocol: { type: grase, n_shots: 4, te: 0.010 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 } } }
+      - { name: grase-4shot-130, protocol: { type: grase, n_shots: 4, te: 0.010, refocusing_deg: 130 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 } } }
+      - { name: spiral, protocol: { type: spiral, interleaves: 8, te: 0.012 }, overlay: { acquisition: { matrix: [68, 68] }, readout: { interleaves: 8, spiral_readout_time: 5.0, dwell_time: 4.0e-6 } } }
+      - { name: grase-4shot-bgsup, protocol: { type: grase, n_shots: 4, te: 0.010, background_suppression: [1.90, 3.25] }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 } } }
+      - { name: spiral-bgsup, protocol: { type: spiral, interleaves: 8, te: 0.012, background_suppression: [1.90, 3.25] }, overlay: { acquisition: { matrix: [68, 68] }, readout: { interleaves: 8, spiral_readout_time: 5.0, dwell_time: 4.0e-6 } } }
+      - { name: grase-4shot-fieldmap, phantom: slab-fieldmap, protocol: { type: grase, n_shots: 4, te: 0.010 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 } } }
+      - { name: spiral-fieldmap, phantom: slab-fieldmap, protocol: { type: spiral, interleaves: 8, te: 0.012 }, overlay: { acquisition: { matrix: [68, 68] }, readout: { interleaves: 8, spiral_readout_time: 5.0, dwell_time: 4.0e-6 } } }
+      - { name: grase-4shot-physio, protocol: { type: grase, n_shots: 4, te: 0.010 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 }, physio: { tissue_cardiac: 0.02, tissue_respiratory: 0.01, tissue_drift: 0.01, label_cardiac: 0.03 } } }
+      - { name: grase-4shot-shotmotion, protocol: { type: grase, n_shots: 4, te: 0.010 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 }, motion: { within_volume: { dropout_rate: 0.08, severity: 0.5, jump_mm: [1.0, 0.0, 0.0], jump_deg: [0.0, 0.0, 1.0] } } } }
+  physio:
+    description: >-
+      physiological noise on the reference 2D protocol (30 pairs): a cardiac modulation of 2 percent,
+      a respiratory one of 1 percent and a slow drift of 1 percent on the static tissue signal, and a
+      3 percent cardiac modulation of the label, without and with the two background suppression
+      pulses; the simulator records the true phases and factors it applied
+    chapters: [8, 9]
+    overlay: { physio: { tissue_cardiac: 0.02, tissue_respiratory: 0.01, tissue_drift: 0.01, label_cardiac: 0.03 } }
+    variants:
+      - { name: "off" }
+      - { name: "on", protocol: { background_suppression: [2.25, 3.50] } }
+  hadamard:
+    description: >-
+      time-encoded PCASL: seven sub-boli of 0.4 s (a Hadamard matrix of order 8) read 0.3 s after
+      the last one, in seven encoding cycles of eight volumes, which the simulator decodes into
+      49 sub-bolus difference images (seven delays from 0.3 to 2.7 s, seven times each) and whose
+      raw encoded volumes it keeps under sourcedata; with the 2D EPI readout and with the four-shot
+      3D GRASE readout; and the conventional multi-delay series of the same 56 volumes, four
+      pairs of a 0.4 s bolus at each of the seven delays
+    chapters: [18]
+    variants:
+      - { name: epi, protocol: { type: hadamard, order: 8, n_cycles: 7 }, overlay: { hadamard: { order: 8 } } }
+      - { name: grase, protocol: { type: hadamard, order: 8, n_cycles: 7, readout: grase, n_shots: 4, te: 0.010 }, overlay: { hadamard: { order: 8 }, readout: { ky_segments: 4, line_spacing: 0.3 } } }
+      - { name: conventional, protocol: { type: multi_pld, plds: [0.3, 0.7, 1.1, 1.5, 1.9, 2.3, 2.7], pairs_per_pld: 4, ld: 0.4 } }
+  look-locker:
+    description: >-
+      a Look-Locker series: after each pulsed (FAIR) labeling with a 0.7 s Q2TIPS cut-off, eight
+      gradient-echo readouts at 35 degrees sample the slab every 0.5 s from an inversion time of
+      0.8 to 4.3 s (the 20 slices, 24 ms apart, fit between readouts); a control cycle then a label
+      cycle, eight pairs at TR 5 s, and a separate M0 scan at the same flip angle
+    chapters: [18]
+    run: pasl-ll
+    protocol: { type: look_locker, n_pairs: 8, tr: 5.0, flip_deg: 35 }
+    overlay: { signal: { acq_contrast: ge }, look_locker: { readouts_per_cycle: 8 } }
+  multi-te:
+    description: >-
+      multi-echo PCASL with a finite exchange time of 0.5 s, so that label still in the capillary
+      decays with the blood's T2 and exchanged label with the tissue's: a gradient-echo readout at
+      60 degrees read at 12, 33 and 54 ms (one sidecar per echo, written as the BIDS echo-N
+      layout) at a post-labeling delay of 1.0 s, where much of the label is still intravascular,
+      and at the reference 1.8 s; and a spin-echo variant at 24, 48 and 72 ms at 1.0 s; the
+      slices 90 ms apart so that every echo's block fits, TR 5.5 s, 15 pairs
+    chapters: [16, 19]
+    protocol: { n_pairs: 15, tr: 5.5, slice_spacing: 0.09 }
+    overlay: { kinetic: { exchange_time: 0.5 } }
+    variants:
+      - { name: ge-pld10, protocol: { type: multi_te, echo_times: [0.012, 0.033, 0.054], contrast: ge, flip_deg: 60, pld: 1.0 }, overlay: { signal: { acq_contrast: ge } } }
+      - { name: ge-pld18, protocol: { type: multi_te, echo_times: [0.012, 0.033, 0.054], contrast: ge, flip_deg: 60, pld: 1.8 }, overlay: { signal: { acq_contrast: ge } } }
+      - { name: se-pld10, protocol: { type: multi_te, echo_times: [0.024, 0.048, 0.072], contrast: se, pld: 1.0 } }
+  vascular:
+    description: >-
+      the macrovascular signal: an arterial compartment (2 percent of a gray-matter voxel and 0.8
+      percent of a white-matter voxel is arterial blood, reaching the voxel's arteries 0.3 s
+      before the tissue's label arrives) added to the reference labeling at seven delays from 0.1
+      to 1.8 s, four pairs each, read with the four-shot 3D GRASE so that every voxel shares each
+      delay; acquired without crushing and with vascular crushing (VENC 4 cm/s against arterial
+      speeds of 10 cm/s in gray matter and 6 in white matter), beside the same series without an
+      arterial compartment
+    chapters: [5, 19]
+    protocol: { type: grase, label: multi_pld, n_shots: 4, te: 0.010, plds: [0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 1.8], pairs_per_pld: 4 }
+    overlay: { readout: { ky_segments: 4, line_spacing: 0.3 } }
+    variants:
+      - { name: none }
+      - { name: uncrushed, overlay: { macrovascular: { arterial_blood_volume: { grey_matter: 0.02, white_matter: 0.008, csf: 0.0 }, arterial_transit_time: { grey_matter: 0.5, white_matter: 0.9, csf: 0.0 } } } }
+      - { name: crushed, protocol: { extra: { VascularCrushing: true, VascularCrushingVENC: 4.0 } }, overlay: { macrovascular: { arterial_blood_volume: { grey_matter: 0.02, white_matter: 0.008, csf: 0.0 }, arterial_transit_time: { grey_matter: 0.5, white_matter: 0.9, csf: 0.0 } }, vascular_crushing: { arterial_velocity: { grey_matter: 10.0, white_matter: 6.0, csf: 3.0 } } } }

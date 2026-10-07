@@ -82,45 +82,89 @@ class Run:
         return self.dataset.file(f"{self.name}/{rel}")
 
     # -- the series -------------------------------------------------------------------
-    def perf(self, suffix: str) -> Path:
-        return self.file(f"sub-01/perf/sub-01_{suffix}")
+    def perf(self, suffix: str, echo: int | None = None, raw: bool = False) -> Path:
+        """A file of the series: ``sub-01/perf/sub-01_<suffix>``. ``echo`` (1-based) picks one
+        series of a multi-echo run (the BIDS ``echo-N`` entity); ``raw`` the encoded series a
+        Hadamard run keeps under ``sourcedata``."""
+        root = "sourcedata/" if raw else ""
+        if echo is None and not (self.path / f"{root}sub-01/perf/sub-01_{suffix}").exists() \
+                and (self.path / f"{root}sub-01/perf/sub-01_echo-1_{suffix}").exists():
+            echo = 1  # a multi-echo run: the first echo stands in for the series
+        tag = f"_echo-{echo}" if echo else ""
+        return self.file(f"{root}sub-01/perf/sub-01{tag}_{suffix}")
 
-    def sidecar(self) -> dict:
-        return json.loads(self.perf("part-mag_asl.json").read_text())
+    def sidecar(self, echo: int | None = None) -> dict:
+        return json.loads(self.perf("part-mag_asl.json", echo).read_text())
 
     def context(self) -> list[str]:
         return self.perf("aslcontext.tsv").read_text().split()[1:]
 
-    def image(self, suffix: str) -> nib.Nifti1Image:
-        return nib.load(self.perf(suffix))
+    def echoes(self) -> list[int]:
+        """The echo numbers of a multi-echo run (``[]`` for one echo)."""
+        self.file("sub-01/perf/sub-01_aslcontext.tsv")  # makes sure the run's archive is present
+        out, e = [], 1
+        while (self.path / f"sub-01/perf/sub-01_echo-{e}_part-mag_asl.nii.gz").exists():
+            out.append(e)
+            e += 1
+        return out
 
-    def mag(self) -> np.ndarray:
-        return np.asarray(self.image("part-mag_asl.nii.gz").dataobj, np.float32)
+    def image(self, suffix: str, echo: int | None = None, raw: bool = False) -> nib.Nifti1Image:
+        return nib.load(self.perf(suffix, echo, raw))
 
-    def phase(self) -> np.ndarray:
-        return np.asarray(self.image("part-phase_asl.nii.gz").dataobj, np.float32)
+    def mag(self, echo: int | None = None, raw: bool = False) -> np.ndarray:
+        return np.asarray(self.image("part-mag_asl.nii.gz", echo, raw).dataobj, np.float32)
 
-    def m0scan(self) -> np.ndarray:
-        return np.asarray(self.image("m0scan.nii.gz").dataobj, np.float32)
+    def phase(self, echo: int | None = None, raw: bool = False) -> np.ndarray:
+        return np.asarray(self.image("part-phase_asl.nii.gz", echo, raw).dataobj, np.float32)
 
-    def m0scan_sidecar(self) -> dict:
-        return json.loads(self.perf("m0scan.json").read_text())
+    def m0scan(self, echo: int | None = None) -> np.ndarray:
+        return np.asarray(self.image("m0scan.nii.gz", echo).dataobj, np.float32)
+
+    def m0scan_sidecar(self, echo: int | None = None) -> dict:
+        return json.loads(self.perf("m0scan.json", echo).read_text())
 
     # -- the answer key ---------------------------------------------------------------
-    def truth(self, name: str) -> np.ndarray:
+    def truth(self, name: str, raw: bool = False) -> np.ndarray:
         """A ground-truth map: ``perfusion``, ``att``, ``T1map``, ``T2map``, ``M0map``,
-        ``dseg`` (int), ``deltam`` (4-D), ``deltamStatic`` (motion runs)."""
+        ``dseg`` (int), ``deltam`` (4-D), ``deltamStatic`` (motion runs), and the maps of the
+        optional features (``deltamIntravascular``, ``deltamArterial``, ``deltamSuppressed``,
+        ``aBV``, ``aATT``, ``deltamRead``). ``raw`` reads the encoded truth of a Hadamard run
+        (``sourcedata``)."""
         dtype = np.int16 if name == "dseg" else np.float32
-        return np.asarray(nib.load(self.file(f"sub-01/perf/ground-truth/sub-01_desc-{name}_gt.nii.gz")).dataobj, dtype)
+        root = "sourcedata/" if raw else ""
+        return np.asarray(nib.load(self.file(f"{root}sub-01/perf/ground-truth/sub-01_desc-{name}_gt.nii.gz")).dataobj, dtype)
 
     def truth_sidecar(self, name: str) -> dict:
         return json.loads(self.file(f"sub-01/perf/ground-truth/sub-01_desc-{name}_gt.json").read_text())
 
-    def motion(self):
-        """The applied poses as a pandas DataFrame (motion runs only)."""
+    def _tsv(self, rel: str):
         import pandas as pd
 
-        return pd.read_csv(self.file("sub-01/perf/ground-truth/sub-01_desc-motion_gt.tsv"), sep="\t")
+        return pd.read_csv(self.file(rel), sep="\t")
+
+    def motion(self):
+        """The applied poses as a pandas DataFrame (motion runs only)."""
+        return self._tsv("sub-01/perf/ground-truth/sub-01_desc-motion_gt.tsv")
+
+    def motion_events(self):
+        """The within-volume (shot) motion events of a segmented run, as a DataFrame."""
+        return self._tsv("sub-01/perf/ground-truth/sub-01_desc-motionEvents_gt.tsv")
+
+    def physio(self):
+        """The physiological factors applied per volume and slice (or shot), as a DataFrame."""
+        return self._tsv("sub-01/perf/ground-truth/sub-01_desc-physio_gt.tsv")
+
+    def look_locker(self):
+        """A Look-Locker run's tissue state before every readout, as a DataFrame."""
+        return self._tsv("sub-01/perf/ground-truth/sub-01_desc-lookLocker_gt.tsv")
+
+    def raw_volumes(self):
+        """A Hadamard run's table of raw (encoded) volumes: cycle, encoding row, labeled sub-boli."""
+        return self._tsv("sourcedata/sub-01/perf/sub-01_rawvolumes.tsv")
+
+    def preparations(self):
+        """A Hadamard run's per-preparation factors (``sourcedata`` ground truth)."""
+        return self._tsv("sourcedata/sub-01/perf/ground-truth/sub-01_desc-preparations_gt.tsv")
 
     def fraction(self, tissue: str) -> np.ndarray:
         """Tissue fraction (``gm``, ``wm``, ``csf``) of every acquisition voxel."""
@@ -142,10 +186,12 @@ class Run:
         suppression; the sidecar carries ``null`` there)."""
         return float(self.simulation().get("BackgroundSuppressionLabelFactor") or 1.0)
 
-    def signed(self) -> np.ndarray:
+    def signed(self, echo: int | None = None, raw: bool = False) -> np.ndarray:
         """The series as signed real images, ``magnitude * cos(phase)``: under background
-        suppression the tissue can be inverted at readout, which the magnitude hides."""
-        return (self.mag() * np.cos(self.phase())).astype(np.float32)
+        suppression the tissue can be inverted at readout, which the magnitude hides, and the
+        decoded ``deltam`` volumes of a Hadamard run are a few noise standard deviations
+        large, so their magnitude is a Rician floor rather than the signal."""
+        return (self.mag(echo, raw) * np.cos(self.phase(echo, raw))).astype(np.float32)
 
 
 @dataclass(frozen=True)

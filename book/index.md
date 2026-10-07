@@ -11,8 +11,10 @@ scored against a known answer. The answer exists because the brain in these page
 simulated: a digital phantom {cite:p}`olivertaylor2021` with one perfusion rate, transit time, T1, T2, and equilibrium
 magnetization per tissue passes through **aslscan**, a headless arterial spin labeling (ASL)
 simulator that evaluates the kinetic model {cite:p}`buxton1998` in every voxel, forms the label and control
-images, and acquires them with a model of a 2D spin-echo echo-planar scanner, k-space and
-all. The same phantom yields the ground-truth maps that no scanner can provide.
+images, and acquires them with a model of the scanner's readout, k-space and all: a 2D
+echo-planar readout in the reference series, a 3D GRASE or stack-of-spirals readout where
+the chapters compare them. The same phantom yields the ground-truth maps that no scanner can
+provide.
 
 :::{admonition} Status
 :class: note
@@ -28,11 +30,11 @@ from the data release. The datasets are simulated by the repository's offline pi
 | Part | Chapters | What you will be able to do |
 |---|---|---|
 | Front matter | 0.1–0.3 | run the book, know the simulated datasets, read the notation |
-| I. MRI physics for perfusion imaging | 1–2 | follow the longitudinal magnetization through saturation and inversion, and know what an EPI readout does to an image |
+| I. MRI physics for perfusion imaging | 1–2 | follow the longitudinal magnetization through saturation and inversion, and know what an EPI, a 3D GRASE or a spiral readout does to an image |
 | II. Perfusion and its labeling | 3–7 | define perfusion, label arterial water three ways, predict the difference signal with the kinetic model, read an ASL series, and choose the delay, duration, TR, voxel, and number of pairs |
 | III. Artifacts and preprocessing | 8–13 | recognize noise, background suppression, head motion, susceptibility distortion, partial volume effects, and readout imperfections in simulated data, correct them, and measure what remains |
 | IV. Quantification | 14–17 | compute CBF from a single delay, fit transit time and CBF from several delays, calibrate with M0 and the assumed constants, and decide what a given acquisition allows |
-| V. Advanced acquisitions | 18–19 | reason about time-encoded and Look-Locker sampling, and where the field is heading |
+| V. Advanced acquisitions | 18–19 | decode a time-encoded series and quantify a Look-Locker one, read the exchange of label from a multi-echo series, measure the arterial signal that crushing removes, and know where the field is heading |
 
 ## Two kinds of simulation
 

@@ -8,8 +8,10 @@ kernelspec:
 :::{admonition} Simulated datasets in this chapter
 :class: note
 - **Built in this page:** the kinetic model of [Chapter 5](../02-labeling/05-kinetic-model.md) evaluated sub-bolus by sub-bolus on the pure tissues and on the packaged phantom slab, with noise added in the page; a Look-Locker readout train simulated from the same model ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **`hadamard`**: time-encoded PCASL with seven sub-boli of 0.4 s in seven cycles of eight volumes, with the 2D EPI readout (`epi`) and the four-shot 3D GRASE readout (`grase`), the encoded volumes kept under `sourcedata` and the decoded series as the main dataset; and the conventional multi-delay twin of the same 56 volumes (`conventional`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-hadamard)).
+- **`look-locker`**: a pulsed (FAIR) label followed by eight gradient-echo readouts at 35° every 0.5 s from TI 0.8 s, eight pairs, with the undepleted and the as-read difference truths (`pasl-ll`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-look-locker)).
 
-Neither acquisition of this chapter is simulated by aslscan, so there is no pipeline-tier dataset here: everything is toy tier ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
+Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 :::
 
 ## Learning goals
@@ -20,10 +22,14 @@ After this chapter you can:
   signals are recovered from one series by a decoding sum
 - derive the noise of a decoded sub-bolus, state the gain over a conventional multi-delay
   series of the same duration, and measure it
-- fit CBF and the arterial transit time to a decoded series with the same code as
-  [Chapter 15](../04-quantification/15-multi-delay.md)
+- decode the encoded volumes of a simulated time-encoded series, check the decoded noise
+  against the prediction, and fit CBF and the arterial transit time to the decoded series
+  with the same code as [Chapter 15](../04-quantification/15-multi-delay.md), slice timing
+  included
 - simulate a Look-Locker readout train, say how each readout consumes the label, and
   correct the sampled curve for it
+- score a simulated Look-Locker series against what each readout read and against the
+  undepleted curve, and recover CBF from it with an explicit model of the train
 - say what the QUASAR sequence adds to a Look-Locker acquisition
 
 ```{code-cell} python
@@ -34,13 +40,14 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Rectangle
 from scipy.linalg import hadamard
 
-from aslbook import kinetic, phantom, plotting, presets, quant, synth
+from aslbook import data, kinetic, phantom, plotting, presets, protocols, quant, synth
 from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, set_style
 
 set_style()
 GM, WM = presets.TISSUES["GM"], presets.TISSUES["WM"]
 SCALE = presets.REFERENCE.signal_scale  # image units per M0 unit
 SIGMA = 40.0  # the reference protocol's noise, image units
+K = phantom.DISPLAY_SLICE
 ```
 
 ## Why encode the time axis
@@ -446,6 +453,244 @@ serve as a single-delay measurement on its own {cite:p}`teeuwisse2014,woods2024`
 the shortest delays the decoded signal contains labeled blood still in arteries
 {cite:p}`chappell2010`, which the kinetic model does not describe; [Chapter 19](./19-frontiers.md) shows what that does to a fit.
 
+## See it: the encoded series the scanner acquired
+
+The `hadamard` dataset is the same acquisition simulated end to end by aslscan, with the
+timing of the toy above: seven sub-boli of 0.4 s, the readout 0.3 s after the last one,
+seven encoding cycles of eight volumes. The `epi` run uses the reference 2D readout, whose
+20 slices are read 40 ms apart, so slice $z$ reads at $3.1 + 0.04\,z$ s and every
+sub-bolus's delay grows down the slab; the `grase` run uses the four-shot 3D GRASE readout
+of [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md), which excites the whole slab
+at 3.1 s; and the `conventional` run is the multi-delay twin, four pairs of a 0.4 s bolus at
+each of the seven delays, 56 volumes with the same readout as `epi`. Each time-encoded run
+keeps the 56 encoded volumes the scanner acquired under `sourcedata` (`run.mag(raw=True)`,
+with `run.raw_volumes()` listing which sub-boli each volume labeled) and stores as its main
+series the 49 volumes the simulator decoded from them, seven per cycle in sub-bolus order,
+every row of the aslcontext a `deltam`. The first figure is what the scanner saw: the eight
+encoded volumes of the first cycle at the display slice.
+
+```{code-cell} python
+:tags: [hide-input]
+had = data.load_dataset("hadamard")
+epi = had.run("epi")
+p_epi, sim_had = epi.sidecar(), epi.simulation()["Hadamard"]
+raw_mag, raw_phase = epi.mag(raw=True), epi.phase(raw=True)
+raw = raw_mag * np.cos(raw_phase)                      # signed encoded volumes (x, y, z, 56)
+fr_h, mask_h = epi.fractions(), epi.mask()
+gm_h, wm_h = fr_h["gm"] >= 0.99, fr_h["wm"] >= 0.99      # pure voxels of the acquisition grid
+rows = epi.raw_volumes()
+H_sidecar = np.array(sim_had["Matrix"])
+
+fig, axes = plt.subplots(2, 4, figsize=(11, 5.6))
+for i, ax in enumerate(axes.ravel()):
+    labeled = rows.labeled_subboli[i] if isinstance(rows.labeled_subboli[i], str) else "none"
+    plotting.show_slice(ax, raw_mag[..., i], K, f"volume {i}: labeled {labeled}", vmin=0, vmax=7000)
+fig.tight_layout()
+gm_ctrl = raw[..., 0][gm_h].mean()
+spread = np.array([raw[..., i][gm_h].mean() for i in range(N)]) - gm_ctrl
+print(f"sidecar Matrix equals scipy's hadamard(8) without its first column: {np.array_equal(H_sidecar, H[:, 1:])}")
+print(f"{len(rows)} encoded volumes in {rows.cycle.max()} cycles; order {sim_had['Order']}, decoded volumes {sim_had['Counts']['Decoded']}")
+print(f"pure GM mean of each encoded volume of cycle 1 minus the control volume (image units): {np.round(spread, 1)}")
+print(f"the pure GM control signal is {gm_ctrl:.0f} image units")
+```
+
+All eight images look like control images, because they are: a labeled sub-bolus removes at
+most a few tens of image units from a gray-matter signal of 6263. The printed means of the
+pure gray-matter voxels show the removal: the seven encoded volumes sit 38 to 67 units
+below the all-control volume 0, most for volume 4, which labels the four sub-boli arriving
+at the readout. Those differences,
+not the images, carry the perfusion signal, and the decoding sum of the previous sections
+extracts them. The sidecar's `Matrix` is `scipy.linalg.hadamard(8)` without its all-ones
+first column, exactly the matrix the toy used, so the toy's decoding matrix `D` applies to
+the acquired series as it is. The next cell decodes each cycle's eight signed volumes
+(magnitude times the cosine of the phase, as [Chapter 9](../03-preprocessing/09-background-suppression.md)
+does) with `D` and compares the result with the simulator's own decoded series.
+
+```{code-cell} python
+:tags: [hide-input]
+dec_sim = epi.signed()                                           # (x, y, z, 49): the simulator's decoded series, signed
+dec_mag = epi.mag()
+dec_page = np.zeros(dec_sim.shape, np.float32)
+for c in range(R_BLOCKS):
+    dec_page[..., n_sub * c:n_sub * (c + 1)] = raw[..., N * c:N * (c + 1)].astype(np.float64) @ D.T
+dec_cyc = dec_sim.reshape(dec_sim.shape[:3] + (R_BLOCKS, n_sub))  # (x, y, z, cycle, sub-bolus)
+dec_mean = dec_cyc.mean(axis=3)                                   # the mean over the seven cycles
+leak = np.array([c["Normalized"] for c in sim_had["TissueLeakage"]])
+
+fig, axes = plt.subplots(1, 4, figsize=(11, 3.1))
+for ax, j in zip(axes[:3], show):
+    plotting.show_slice(ax, dec_mean[..., j], K, f"signed, PLD {plds[j]:.1f} s (mean of 7)", kind="diff", vmin=-30, vmax=30)
+plotting.show_slice(axes[3], dec_mag.reshape(dec_cyc.shape).mean(axis=3)[..., show[0]], K, f"magnitude, PLD {plds[show[0]]:.1f} s", vmin=0, vmax=60)
+fig.tight_layout()
+print(f"page decoding vs the simulator's decoded series: max |difference| in the brain {np.abs(dec_page - dec_sim)[mask_h].max():.1e} image units")
+print(f"tissue leakage reported by the simulator (normalized, max over cycles and sub-boli): {leak.max():.1e}")
+print(f"pure GM, sub-bolus 5 (PLD {plds[4]:.1f} s): signed decoded mean {dec_mean[..., 4][gm_h].mean():.1f}, magnitude of the decoded volumes {dec_mag.reshape(dec_cyc.shape)[..., 4][gm_h].mean():.1f} image units")
+```
+
+The first three panels are the decoded sub-boli at the same three delays and the same
+window as the toy slab, averaged over the seven cycles; the cortical ribbon and its decay
+from PLD 1.1 to 2.7 s are the toy's. The page's decoding and the simulator's agree to
+$5.5 \times 10^{-4}$ image units, the rounding of the stored float32 magnitude and phase:
+the simulator applies the same $D$ to the complex images in float64, as its `DecodingRule`
+states, and the page applies it to their real parts, which is the same thing for a linear
+sum. The simulator also reports the *tissue leakage* of each cycle, the decoded result of
+the static tissue alone, which is zero to machine precision here: the static signal is
+identical in all eight volumes, so the orthogonality that kills it is exact. It would not
+be exact if the static signal changed between the volumes, as background suppression under
+a per-volume model, physiological fluctuations, drift or motion would make it, and the
+sidecar's `NonExact` flags record which of those were on (none here). The fourth panel is a
+warning about the stored series: a decoded volume is written as magnitude and phase like
+any other, and its *magnitude* is the Rician floor of [Chapter 8](../03-preprocessing/08-noise.md),
+not the signal. The noise of a decoded volume is 27 image units per component, the
+gray-matter signal 5 to 23, so the magnitude is noise-dominated everywhere: 39.4 against a
+signed mean of 18.7 image units for sub-bolus 5, as printed. Use the signed image.
+
+```{code-cell} python
+:tags: [hide-input]
+TE_H = p_epi["EchoTime"]
+label_fac = SCALE * np.exp(-TE_H / presets.T2_BLOOD)                # truth (M0 units) -> difference image units
+truth_cyc = epi.truth("deltam").reshape(dec_cyc.shape)
+offsets = np.array(protocols.slice_offsets(p_epi))
+sd_dec = dec_cyc[gm_h].std(axis=1, ddof=1).mean(axis=0)              # SD over cycles of each sub-bolus, pure GM
+sd_raw = raw.reshape(raw.shape[:3] + (R_BLOCKS, N))[gm_h].std(axis=1, ddof=1).mean()
+
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.2), sharey=True)
+for ax, z in zip(axes, (0, K, 19)):
+    m = gm_h[:, :, z]
+    meas = dec_cyc[:, :, z][m].mean(axis=(0, 1))
+    se = dec_cyc[:, :, z][m].mean(axis=1).std(axis=0, ddof=1) / np.sqrt(m.sum())
+    truth = truth_cyc[:, :, z][m].mean(axis=(0, 1)) * label_fac
+    ax.plot(pld_axis, label_fac * kinetic.delta_m(pld_axis + offsets[z] + TAU, GM.perfusion, GM.att, GM.t1, GM.m0, tau=TAU), color=INK["secondary"], lw=1.2, label="kinetic curve at this slice's delays")
+    ax.plot(plds, truth, "x", color="k", ms=7, label="truth of the decoded volumes")
+    ax.errorbar(plds, meas, yerr=se, fmt="o", color=TISSUE_COLORS["GM"], capsize=3, label="decoded, pure GM mean ± SE")
+    ax.set(xlabel="nominal PLD of the sub-bolus (s)", title=f"slice {z}: read at {t_read + offsets[z]:.2f} s, {m.sum()} voxels")
+axes[0].set(ylabel="decoded ΔM (image units)")
+axes[0].legend(fontsize=7)
+fig.tight_layout()
+print(f"decoded noise SD over the 7 cycles, pure GM, per sub-bolus: {np.round(sd_dec, 1)}, mean {sd_dec.mean():.1f} image units")
+print(f"raw (encoded) noise SD {sd_raw:.1f} x NoiseScale {sim_had['NoiseScale']:.3f} = {sd_raw * sim_had['NoiseScale']:.1f}; predicted from sigma 40: {40 * 2 / np.sqrt(N):.1f}")
+for z in (0, K, 19):
+    m = gm_h[:, :, z]
+    print(f"slice {z:2d}: decoded GM mean {np.round(dec_cyc[:, :, z][m].mean(axis=(0, 1)), 1)}, truth {np.round(truth_cyc[:, :, z][m].mean(axis=(0, 1)) * label_fac, 1)}")
+```
+
+The decoded noise is the prediction: 27.2 image units for every sub-bolus against the raw
+noise of 38.4 times the sidecar's `NoiseScale` of 0.707, which is $2/\sqrt{8}$, and
+against the 28.3 the toy predicted from a nominal $\sigma$ of 40 (a standard deviation
+estimated from seven samples is low by the factor 0.96 on average, which is 38.4 for 40 and
+27.1 for 28.3). The panels put the measurement
+against the truth slice by slice. The truth (crosses) is the `deltam` ground truth of the
+decoded volumes, the kinetic model of each sub-bolus at the slice's own readout time, in
+difference-image units ($M_0$ units times 100 times the blood T2 factor $e^{-\mathrm{TE}/T_{2\mathrm{b}}}$),
+and the decoded means (circles, with their standard error over the pure gray-matter voxels)
+follow it. The three panels differ because the 2D readout reads slice 0 at 3.10 s, slice 9
+at 3.46 s and slice 19 at 3.86 s: in the bottom slice the last sub-bolus (nominal PLD 0.3 s)
+has not arrived and reads zero, while in the top slice it has had 1.06 s and is the largest
+value. A 2D time-encoded series is seven delays per slice, not seven delays; the fit below
+passes the slice offsets to `quant.fit_multi_pld` for that reason. The top slice holds 14
+pure voxels and is correspondingly noisy.
+
+```{code-cell} python
+:tags: [hide-input]
+grase = had.run("grase")
+p_gr, ro_gr = grase.sidecar(), grase.simulation()["Readout"]
+dec_gr = grase.signed().reshape(dec_cyc.shape)
+raw_gr = (grase.mag(raw=True) * np.cos(grase.phase(raw=True))).reshape(raw.shape[:3] + (R_BLOCKS, N))
+fr_g = grase.fractions()
+gm_g = fr_g["gm"] >= 0.99
+truth_gr = grase.truth("deltam").reshape(dec_cyc.shape)
+fac_gr = SCALE * np.exp(-p_gr["EchoTime"] / presets.T2_BLOOD)
+sd_gr = dec_gr[gm_g].std(axis=1, ddof=1).mean(axis=0)
+sd_raw_gr = raw_gr[gm_g].std(axis=1, ddof=1).mean()
+meas_gr = dec_gr[gm_g].mean(axis=(0, 1))
+truth_g = truth_gr[gm_g].mean(axis=(0, 1)) * fac_gr
+per_slice = [dec_gr[:, :, z][gm_g[:, :, z]].mean() for z in (0, K, 19)]
+print(f"GRASE: {ro_gr['NumberShots']} shots of TR {p_gr['RepetitionTimePreparation']} s, a volume every {ro_gr['VolumeDuration']:.0f} s: "
+      f"{56 * ro_gr['VolumeDuration'] / 60:.0f} min against {56 * p_epi['RepetitionTimePreparation'] / 60:.1f} min for the EPI run")
+print(f"GRASE decoded noise SD, pure GM: {sd_gr.mean():.2f} image units (raw {sd_raw_gr:.2f} x {sim_had['NoiseScale']:.3f} = {sd_raw_gr * sim_had['NoiseScale']:.2f}); "
+      f"EPI / GRASE = {sd_dec.mean() / sd_gr.mean():.2f}, sqrt(20 partitions) = {np.sqrt(20):.2f}")
+print(f"GRASE decoded GM mean per sub-bolus, whole slab: {np.round(meas_gr, 1)}")
+print(f"GRASE truth per sub-bolus (every partition at 3.1 s): {np.round(truth_g, 1)}; measured / truth: {np.round(meas_gr[:6] / truth_g[:6], 2)}")
+print(f"GRASE decoded GM mean over the seven sub-boli at slices 0, {K}, 19: {np.round(per_slice, 1)} (EPI: {np.round([dec_mean[:, :, z][gm_h[:, :, z]].mean() for z in (0, K, 19)], 1)})")
+```
+
+The GRASE run reads every partition at 3.1 s, so its truth is the same seven numbers in
+every slice and the decoded gray-matter mean over the sub-boli is flat down the slab
+(10.6, 11.9 and 11.7 at the bottom, middle and top slice, where the EPI run's 12.6, 14.1
+and 11.6 change with each slice's delays). Its decoded noise
+is 6.07 image units, 4.48 times lower than the EPI run's 27.2, the $\sqrt{20}$ of a
+Cartesian 3D readout that averages the noise over its 20 partitions
+([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). Two things keep that from
+being a free factor of 4.5. A four-shot volume takes four preparations of 4.5 s, so the 56
+volumes took 17 min against 4.2 min for the EPI run, and at equal scan time the EPI run
+could have averaged four times as many cycles, halving its noise. And the GRASE signal is
+lower: the measured sub-bolus means are 0.92 to 0.93 of their truth, because the echo
+train's T2 decay to the center of k-space and the through-plane point-spread function
+of the centric partition order attenuate and blur the thin cortex, as Chapter 2 measures
+on a single-delay series. A fit that ignores the readout's attenuation inherits it as a
+CBF bias of the same size.
+
+## Measure it: CBF and ATT from the decoded series, against the conventional series
+
+The decoded `epi` series, averaged over its seven cycles, is a multi-delay series with
+LD 0.4 s and the seven delays of each slice; the `conventional` run, averaged over its four
+pairs at each delay, is the same thing acquired the old way in the same 56 volumes. Both
+are fitted with `quant.fit_multi_pld` as the toy was, with the slice offsets of the 2D
+readout, the calibration image from each run's separate M0 scan corrected with
+`quant.m0_correction` ([Chapter 16](../04-quantification/16-calibration.md)), and the
+tissue $T_1$ from the truth map, so that the comparison isolates the encoding as the toy
+did.
+
+```{code-cell} python
+:tags: [hide-input]
+conv = had.run("conventional")
+p_conv, ctx_conv = conv.sidecar(), conv.context()
+d_conv = quant.subtract(conv.mag(), ctx_conv)                             # (x, y, z, 28 pairs)
+pld_pairs = quant.pld_of_pairs(p_conv, ctx_conv)
+plds_conv = np.unique(pld_pairs)
+d_conv_mean = np.stack([d_conv[..., pld_pairs == u].mean(axis=-1) for u in plds_conv], axis=-1)
+t1_h = np.where(epi.truth("T1map") > 0, epi.truth("T1map"), GM.t1)
+fit_mask_h = (fr_h["gm"] + fr_h["wm"]) >= 0.5
+truth_cbf, truth_att = epi.truth("perfusion"), epi.truth("att")
+series = {"time-encoded": (epi, dec_mean, plds), "conventional": (conv, d_conv_mean, plds_conv)}
+results_h = {}
+for name, (run, dm, pl) in series.items():
+    m0_h = quant.m0_correction(run.m0scan(), tr=run.m0scan_sidecar()["RepetitionTimePreparation"], te=TE_H)
+    results_h[name] = quant.fit_multi_pld(dm, pl, m0_h, tau=TAU, t1_tissue=t1_h, mask=fit_mask_h, att_grid=np.arange(0.2, 3.0, 0.05), slice_offsets=offsets)
+cbf_h, att_h = results_h["time-encoded"]
+fig, axes = plotting.fit_vs_truth(cbf_h, truth_cbf, fit_mask_h, "CBF, time-encoded (hadamard/epi)", k=K, unit="(ml/100 g/min)")
+rois = {"GM": fr_h["gm"] >= 0.9, "WM": fr_h["wm"] >= 0.9}
+for name, (cbf, att) in results_h.items():
+    for tissue, m in rois.items():
+        s, a = quant.score(cbf, truth_cbf, m), quant.score(att, truth_att, m)
+        print(f"{name:13s} pure {tissue}: CBF bias {s['bias']:+5.1f}, RMSE {s['rmse']:5.1f} ml/100 g/min; ATT bias {a['bias']:+.2f}, RMSE {a['rmse']:.2f} s (n = {s['n']})")
+rmse = {name: quant.score(results_h[name][0], truth_cbf, rois["GM"])["rmse"] for name in results_h}
+sd_conv_pair = np.mean([d_conv[..., pld_pairs == u][gm_h].std(axis=1, ddof=1).mean() for u in plds_conv])
+print(f"GM CBF RMSE ratio conventional / time-encoded: {rmse['conventional'] / rmse['time-encoded']:.1f}; "
+      f"noise per delay, conventional {sd_conv_pair / np.sqrt(4):.1f} vs decoded {sd_dec.mean() / np.sqrt(R_BLOCKS):.1f} image units, ratio {sd_conv_pair / 2 / (sd_dec.mean() / np.sqrt(R_BLOCKS)):.2f}")
+```
+
+The 4-panel is the time-encoded CBF at the display slice. In pure gray matter the fit has a
+bias of +7.9 and an RMSE of 24.8 ml/100 g/min, and the transit time an RMSE of 0.38 s about
+a bias of +0.02 s; the toy slab gave 21.5 and 0.30 s with an exact calibration image, a
+Gaussian noise model and no slice timing, and the pipeline's extra RMSE is the noise of the
+M0 scan it divides by and the Rician noise of the raw volumes. The conventional series at
+the same scan time fits with a gray-matter bias of +61.2 and an RMSE of 125.5 ml/100 g/min,
+and a transit-time RMSE of 1.02 s, which is the width of the grid: it measures neither. The
+ratio of the CBF RMSEs is 5.1, as in the toy slab (5.8), and larger than the $\sqrt{7}$ of
+the noise accounting because the nonlinear fit of a series this noisy clips at zero and
+piles up at long transit times. The noise accounting itself holds on the pipeline data:
+per delay, the mean of four conventional pairs has a noise SD of 26.1 image units against
+10.3 for the mean of seven decoded cycles, a ratio of 2.54 ($\sqrt{7} = 2.65$ for Gaussian
+noise; the conventional pairs are differences of Rician magnitudes, the decoded volumes
+sums of signed images). White matter is at the mercy of the noise in both schemes, as in
+the toy, with the nonlinear fit's upward bias (+33.8 and +101.3) again larger for the
+noisier series. The 2D slice timing costs nothing in the fit, since each slice is fitted at its
+own seven delays, but it means the shortest delay is 0.3 s in the bottom slice and 1.06 s
+in the top one: the bottom of the slab samples the arterial phase, the top does not. The
+GRASE run, fitted the same way, trades that and the EPI run's noise for four times the
+scan time and the readout's attenuation.
+
 ## Look-Locker readouts
 
 A different way to sample the curve after one label is to read it many times. A
@@ -622,6 +867,166 @@ effect can be measured rather than assumed. Its price is scan time and a low SNR
 sample, and its lasting contribution was to show how much of the ASL signal at short
 delays is arterial.
 
+## See it: the Look-Locker series
+
+The `look-locker` dataset is a Look-Locker acquisition simulated by aslscan: a pulsed FAIR
+label with the 0.7 s Q2TIPS cut-off, followed by eight gradient-echo readouts at 35° every
+0.5 s, from an inversion time of 0.8 to 4.3 s. The toy above read every 0.3 s from 0.3 s;
+the pipeline starts later and spaces wider because the simulator refuses a PASL readout
+before the cut-off and because the 20 slices of the 2D readout, 24 ms apart, need 0.46 s
+between readouts, so slice $z$ of readout $n$ is excited at $\mathrm{TI}_n + 0.024\,z$. A
+cycle of eight control volumes follows each control labeling and a cycle of eight label
+volumes each label, eight pairs in all at TR 5 s, with a separate M0 scan at the same flip
+angle. The simulator applies the depletion model of the toy: each readout reads
+$\sin\theta$ of the label that has arrived in its slice and leaves $\cos\theta$ of it,
+while label in transit is untouched; the static tissue follows the driven steady state of
+the train. It writes two truths, the undepleted kinetic curve at each readout (`deltam`)
+and what the readout read (`deltamRead`), and the tissue magnetization before every
+readout (`run.look_locker()`). The first figure is the raw data.
+
+```{code-cell} python
+:tags: [hide-input]
+ll = data.load_dataset("look-locker").run()
+p_ll, sim_ll = ll.sidecar(), ll.simulation()
+ctx_ll = ll.context()
+mag_ll = ll.mag()
+n_ro_ll = sim_ll["LookLocker"]["ReadoutsPerCycle"]
+vol_ll = mag_ll.reshape(mag_ll.shape[:3] + (-1, n_ro_ll))               # (x, y, z, cycle, readout)
+ctrl_ll, lab_ll = vol_ll[..., 0::2, :], vol_ll[..., 1::2, :]               # control cycles, label cycles
+TI = np.array(p_ll["PostLabelingDelay"][:n_ro_ll])
+THETA_LL = np.radians(p_ll["FlipAngle"])
+offsets_ll = np.array(protocols.slice_offsets(p_ll))
+fr_ll = ll.fractions()
+gm_ll = (fr_ll["gm"] >= 0.99)[:, :, K]
+assert ctx_ll[0] == "control" and ctx_ll[n_ro_ll] == "label"
+
+fig, axes = plt.subplots(1, 4, figsize=(11, 3.1))
+for ax, (name, vol, n) in zip(axes, [("control", ctrl_ll, 0), ("label", lab_ll, 0), ("control", ctrl_ll, n_ro_ll - 1), ("label", lab_ll, n_ro_ll - 1)]):
+    plotting.show_slice(ax, vol[..., 0, n], K, f"{name}, readout {n + 1} (TI {TI[n]:.1f} s)", vmin=0, vmax=3500)
+fig.tight_layout()
+c_gm = ctrl_ll[:, :, K][gm_ll].mean(axis=(0, 1))
+print(f"{len(ctx_ll)} volumes: {vol_ll.shape[3]} cycles of {n_ro_ll} readouts at TI {TI} s, flip angle {p_ll['FlipAngle']:.0f} deg, TR {p_ll['RepetitionTimePreparation']:.0f} s")
+print(f"pure GM control signal at slice {K}: readout 1 {c_gm[0]:.0f}, readout {n_ro_ll} {c_gm[-1]:.0f} image units (M0 scan at the same angle: {ll.m0scan()[:, :, K][gm_ll].mean():.0f})")
+print(f"pure GM control - label at readout 2, one pair: {(ctrl_ll - lab_ll)[:, :, K][gm_ll][:, 0, 1].mean():.1f} image units")
+```
+
+The four images are the first and the last readout of the first control and the first
+label cycle, in one window. The static signal is low, 3130 image units in gray matter at
+the first readout against 6263 for the spin-echo control of the time-encoded run, because a
+35° pulse reads $\sin 35° = 0.57$ of the magnetization, and it falls to 2591 by the eighth
+readout as the train drives the tissue toward its steady state; the label images are the
+same to the eye, the difference being some twenty image units at the peak readout (23.2 in
+the printed pair). The next cell checks both
+parts of the simulator's model: the static signal against the tissue magnetization in
+`run.look_locker()`, and the difference against the two truths.
+
+```{code-cell} python
+:tags: [hide-input]
+tbl = ll.look_locker()
+mz_gm = tbl[tbl.group == K].groupby("readout").tissue_mz_grey_matter.mean().values      # M0 units, before each readout
+TE_LL = p_ll["EchoTime"]
+t2s_blood = 1.0 / (1.0 / presets.T2_BLOOD + 1.0 / GM.t2prime)                            # the blood compartment's T2* in GM
+ctrl_pred = SCALE * mz_gm * np.sin(THETA_LL) * np.exp(-TE_LL / GM.t2star)
+diff_ll = (ctrl_ll - lab_ll)[:, :, K][gm_ll]                                              # (voxels, pair, readout)
+diff_gm = diff_ll.mean(axis=(0, 1))
+diff_se = diff_ll.mean(axis=1).std(axis=0, ddof=1) / np.sqrt(gm_ll.sum())
+fac_ll = SCALE * np.exp(-TE_LL / t2s_blood)
+read_gm = ll.truth("deltamRead").reshape(vol_ll.shape)[:, :, K][gm_ll][:, 1::2, :].mean(axis=(0, 1)) * fac_ll
+undepleted_gm = ll.truth("deltam").reshape(vol_ll.shape)[:, :, K][gm_ll][:, 1::2, :].mean(axis=(0, 1)) * np.sin(THETA_LL) * fac_ll
+t_ll = TI + offsets_ll[K]
+
+fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11, 3.2))
+ax0.plot(t_ll, ctrl_pred, "-", color=INK["secondary"], lw=1.2, label="tissue Mz before the pulse × sin θ × T2* decay")
+ax0.plot(t_ll, c_gm, "o", color=TISSUE_COLORS["GM"], label="control, pure GM mean")
+ax0.set(xlabel="excitation time of this slice (s)", ylabel="signal (image units)", title="the static signal of the train", ylim=(0, 3500))
+ax0.legend(fontsize=7)
+ax1.plot(t_ll, undepleted_gm, "x--", color=INK["secondary"], ms=7, label="undepleted ΔM × sin θ (truth deltam)")
+ax1.plot(t_ll, read_gm, "s-", color=PALETTE[0], ms=5, label="what the readout read (truth deltamRead)")
+ax1.errorbar(t_ll, diff_gm, yerr=diff_se, fmt="o", color=TISSUE_COLORS["GM"], capsize=3, label="control − label, mean of 8 pairs ± SE")
+ax1.axhline(0, color="k", lw=0.6)
+ax1.set(xlabel="excitation time of this slice (s)", ylabel="ΔM read (image units)", title=f"the label at slice {K}")
+ax1.legend(fontsize=7)
+fig.tight_layout()
+print(f"control / predicted static signal per readout: {np.round(c_gm / ctrl_pred, 3)}")
+print(f"noise of one pair's difference per voxel {diff_ll.std(axis=1, ddof=1).mean():.0f} image units; SE of the mean over 8 pairs and {gm_ll.sum()} voxels {diff_se.mean():.1f}")
+print("readout  TI(s)  measured  read-truth  undepleted×sinθ")
+for n in range(n_ro_ll):
+    print(f"   {n + 1}    {t_ll[n]:.3f}   {diff_gm[n]:6.2f}     {read_gm[n]:6.2f}      {undepleted_gm[n]:6.2f}")
+print(f"the train consumed {1 - read_gm[-1] / undepleted_gm[-1]:.0%} of the label by the last readout; blood T2* in GM {t2s_blood:.3f} s")
+```
+
+Left: the control signal of pure gray matter at the display slice across the eight
+readouts, against the simulator's own record of the tissue magnetization before each
+pulse, scaled by $\sin\theta$, the T2* decay to the 12 ms echo and the image scale. The
+measured points sit 1 % above the line at every readout, the same 1 % by which the
+pipeline's gray matter exceeds the pure-tissue value in every dataset of this book (the
+Gibbs overshoot of the cortex on the acquisition grid), and the shape is the train's: a
+first readout from nearly recovered tissue, then a decay toward the driven steady state.
+Right: the label. The crosses are the undepleted kinetic curve at each readout times
+$\sin\theta$, what a single readout at that time would have read; the squares are what
+the train's readout read, the same curve with the label that had already arrived
+multiplied by $\cos\theta$ at each earlier readout; the gap between them is what the train
+consumed, 71 % of the label by the last readout. The measured difference, averaged over
+the 8 pairs and the 267 pure voxels of the slice, follows the squares within its standard
+error of 1.2 image units; a single pair in a single voxel is some twenty units of signal in
+55 units of noise. The last cell repeats the toy's three fits on this measured
+curve: the samples divided by $\sin\theta$ and by the blood's T2* factor are the
+longitudinal label the train left, in image units, at this slice's eight excitation
+times.
+
+```{code-cell} python
+:tags: [hide-input]
+samples_ll = diff_gm / np.sin(THETA_LL) / np.exp(-TE_LL / t2s_blood)
+DT_LL = TI[1] - TI[0]
+models_ll = {
+    "ignore the readouts": lambda f, a: SCALE * kinetic.delta_m(t_ll, f, a, GM.t1, GM.m0, label_type="PASL", tau=TAU_PASL),
+    "T1 → T1_LL": lambda f, a: SCALE * kinetic.delta_m(t_ll, f, a, t1_look_locker(GM.t1, p_ll["FlipAngle"], dt=DT_LL), GM.m0, label_type="PASL", tau=TAU_PASL),
+    "exact discrete model": lambda f, a: SCALE * look_locker(GM, p_ll["FlipAngle"], perfusion=f, att=a, t_ro=t_ll),
+}
+toy_bias = {name: next(r[2] for r in rows if r[0] == 35.0 and r[1] == name) / GM.perfusion - 1 for name in models_ll}
+pair_curves = diff_ll.mean(axis=0) / np.sin(THETA_LL) / np.exp(-TE_LL / t2s_blood)       # (8 pairs, 8 readouts)
+fits_ll = {}
+print(f"T1_LL for 35° at the train's interval of {DT_LL:.1f} s: {t1_look_locker(GM.t1, p_ll['FlipAngle'], dt=DT_LL):.2f} s (toy, 0.3 s: {t1_look_locker(GM.t1, 35.0):.2f} s)")
+for name, model in models_ll.items():
+    cbf, att = grid_fit(samples_ll, model)
+    jack = np.array([grid_fit(np.delete(pair_curves, i, axis=0).mean(axis=0), model)[0] for i in range(len(pair_curves))])
+    se = np.sqrt((len(jack) - 1) / len(jack) * np.sum((jack - jack.mean()) ** 2))         # jackknife SE over the pairs
+    fits_ll[name] = (cbf, att)
+    print(f"{name:21s}: CBF {cbf:5.1f} ± {se:3.1f} ml/100 g/min ({cbf / GM.perfusion - 1:+.0%}; toy at 35°: {toy_bias[name]:+.0%}), ATT {att:.2f} s (truth 60, 0.80)")
+t_fine_ll = np.linspace(0.5, 4.6, 411)
+fig, ax = plt.subplots(figsize=(7, 3.2))
+ax.plot(t_fine_ll, SCALE * kinetic.delta_m(t_fine_ll, GM.perfusion, GM.att, GM.t1, GM.m0, label_type="PASL", tau=TAU_PASL), color=INK["secondary"], lw=1.2, label="true curve, no readouts")
+ax.errorbar(t_ll, samples_ll, yerr=diff_se / np.sin(THETA_LL) / np.exp(-TE_LL / t2s_blood), fmt="o", color=TISSUE_COLORS["GM"], capsize=3, label="measured / sin θ")
+for (name, (cbf, att)), color in zip(fits_ll.items(), (PALETTE[3], PALETTE[0], PALETTE[2])):
+    if name == "exact discrete model":
+        ax.plot(t_ll, models_ll[name](cbf, att), "s", color=color, ms=4, mfc="none", label=f"{name}: CBF {cbf:.0f}, ATT {att:.2f} s")
+    else:
+        t1_fit = GM.t1 if name == "ignore the readouts" else t1_look_locker(GM.t1, p_ll["FlipAngle"], dt=DT_LL)
+        ax.plot(t_fine_ll, SCALE * kinetic.delta_m(t_fine_ll, cbf, att, t1_fit, GM.m0, label_type="PASL", tau=TAU_PASL), "-", color=color, lw=1.2, label=f"{name}: CBF {cbf:.0f}, ATT {att:.2f} s")
+ax.set(xlabel="excitation time of this slice (s)", ylabel="longitudinal ΔM (image units)", title=f"three fits to the measured Look-Locker curve, slice {K}")
+ax.legend(fontsize=7)
+fig.tight_layout()
+```
+
+The measured curve has eight samples, the first at 1.0 s for this slice, so it misses the
+rise that the toy's 0.3 s train resolved, and its noise is a few percent of the peak; the
+printed uncertainty of each fit is the jackknife standard error over the eight pairs.
+Ignoring the readouts fits a curve that falls too fast as early arrival with too little
+flow: CBF is underestimated by 15 %, three standard errors, against the toy's 28 % at the
+same angle. The bias is smaller here because the train is sparser: the readouts deplete the
+label at $-\ln(\cos\theta)/\Delta t$ per second, which for 0.5 s between readouts gives an
+apparent $T_{1,\mathrm{LL}}$ of 0.87 s against 0.71 s for the toy's 0.3 s, so the measured
+curve falls less far below the true one. The $T_{1,\mathrm{LL}}$ correction returns the
+transit time exactly and overshoots CBF to +14 % (the toy's +9 %), two standard errors
+above the truth. The exact discrete model, the toy's `look_locker` function evaluated at
+this slice's eight excitation times, gives 63.1 ± 3.9 ml/100 g/min and 0.78 s, the truth
+within one standard error. The simulator's depletion model is the same as the toy's,
+which is why the exact fit works, and it is an approximation of the same kind: the label
+is depleted where it has arrived in the slice, and the label on its way is not, which
+ignores the arterial blood inside the imaging slab that a readout also excites. A 2D
+Look-Locker train also makes every slice its own experiment: the excitation times used
+above are those of slice 9, and a fit of the slab must use each slice's.
+
 ## What this implies for acquisition
 
 - **A multi-delay question is a time-encoded question.** At the same scan time, a
@@ -629,8 +1034,15 @@ delays is arterial.
   separate pairs; with the 8 × 8 matrix that is a factor 2.65, and it does not depend on
   the noise level.
 - **Pair time encoding with a 3D readout and background suppression**, as the consensus
-  recommendations do {cite:p}`woods2024`; a 2D readout gives each slice its own set of
-  seven delays.
+  recommendations do {cite:p}`woods2024`. A 2D readout gives each slice its own set of
+  seven delays: in the simulated `epi` run the last sub-bolus reads zero in the bottom
+  slice and is the largest value in the top one, and the fit must use each slice's
+  delays. The 3D GRASE run reads every partition at one time and lowers the decoded
+  noise by $\sqrt{20}$, at four times the scan time per volume and with the echo train's
+  attenuation of the signal.
+- **The decoded noise is what the accounting says**: the raw noise times $2/\sqrt{N}$,
+  for every sub-bolus, on the simulated series as on the toy. Decode signed images; the
+  magnitude of a decoded volume is a Rician floor.
 - **Choose the sub-bolus durations for the question**: equal blocks are simplest,
   T1-adjusted blocks equalize the SNR across delays, and a long first block gives a
   single-delay image for free.
@@ -638,6 +1050,9 @@ delays is arterial.
   macrovascular term, or start the delays late enough for the population's transit times.
 - **A Look-Locker curve is flip-angle dependent**: quantify it with the $T_{1,\mathrm{LL}}$
   correction or an explicit model of the train, never with the single-readout formula.
+  The depletion is measurable on the simulated series, where the train consumed most of
+  the label by the last readout, and the exact model of the train recovers CBF while the
+  single-readout formula loses 15 % of it at 0.5 s between readouts and 28 % at 0.3 s.
 
 ## Further reading
 
@@ -645,6 +1060,9 @@ Time-encoded labeling as first proposed {cite:p}`gunther2007`, Hadamard-encoded 
 {cite:p}`dai2013`, the timing strategies of time-encoded PCASL {cite:p}`teeuwisse2014`,
 and the consensus recommendations for multi-timepoint ASL, which cover time-encoded
 designs and their quantification {cite:p}`woods2024`; the macrovascular signal at short
-delays {cite:p}`chappell2010`; the Look-Locker sampling strategy for ASL {cite:p}`gunther2001` and
+delays {cite:p}`chappell2010`; the 3D GRASE readout that time-encoded series are usually
+paired with {cite:p}`gunther2005,fernandezseara2005` and its comparison with 2D EPI
+{cite:p}`vidorreta2013`; the Rician floor that the magnitude of a decoded volume shows
+{cite:p}`gudbjartsson1995`; the Look-Locker sampling strategy for ASL {cite:p}`gunther2001` and
 QUASAR {cite:p}`petersen2006`; the kinetic model every sub-bolus obeys {cite:p}`buxton1998`;
 and the reviews of advanced ASL methods {cite:p}`vanosch2018,hernandezgarcia2019`.

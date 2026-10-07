@@ -9,6 +9,7 @@ kernelspec:
 :class: note
 - **Built in this page:** a one-dimensional pile-up demonstration, and the phantom's synthetic field map box-averaged onto the acquisition grid ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`sdc`**: the reference protocol on the slab with its synthetic field map, acquired with the phase encoding posterior-anterior (`ap`, `PhaseEncodingDirection` `j-`) and reversed (`pa`, `j`), plus the same protocol on the slab without a field map (`undistorted`), all at TE 20 ms, a total readout time of 35 ms, and 15 pairs ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-sdc)).
+- **`readout-3d`** (four of its runs): the four-shot 3D GRASE (`grase-4shot`: four interleaved k_y segments of 17 lines, line spacing 0.3 ms, `TotalReadoutTime` 5 ms) and the stack of spirals (`spiral`: eight 5 ms interleaves) on the slab, and the same two on the slab with the field map (`grase-4shot-fieldmap`, `spiral-fieldmap`), 15 pairs each ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout-3d)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 :::
@@ -21,6 +22,7 @@ After this chapter you can:
 - read the sign of the displacement from `PhaseEncodingDirection` and check it on a blip-up/blip-down pair
 - undo the distortion when the field is known, including the intensity correction, and explain how the field is estimated from a reversed-polarity pair when it is not
 - say what distortion does to a CBF map, why the M0 division hides part of it, and why the hidden part still matters
+- explain why a segmented 3D GRASE is displaced a quarter as far as a single-shot readout of the same line spacing, why a stack of spirals blurs instead of displacing, and what each needs from a pipeline
 
 ```{code-cell} python
 :tags: [hide-cell]
@@ -425,14 +427,267 @@ The `kitchen-sink` dataset of [Chapter 13](./13-assembled-pipeline.md) puts the 
 correction into the full pipeline for this reason.
 :::
 
+## 3D readouts under the same field: a segmented GRASE and a spiral
+
+The displacement formula has no term for the number of excitations, only for the phase a
+spin accrues between consecutive reconstructed lines. That is what a segmented 3D readout
+changes. In the four-shot 3D GRASE of the `readout-3d` dataset
+{cite:p}`gunther2005,fernandezseara2005`, each echo of the train reads every fourth $k_y$
+line, and the four shots interleave their lines into one 68-line plane. Within one echo the
+lines are 0.3 ms apart, but they are every fourth line of the plane; the three lines in
+between come from the other shots, read at the same moment of their own echoes. The
+off-resonance phase therefore climbs by $2\pi\,\Delta f \times 0.3$ ms every four lines, a
+ramp of 0.075 ms per reconstructed line: the effective echo spacing is the line spacing over
+the segment count, and `TotalReadoutTime`, the effective echo spacing times the 67 line
+intervals, is a quarter of the single-shot value. The displacement is still
+$\Delta f \cdot \text{TotalReadoutTime}$ along the phase-encode axis, with the same sign
+rule, and the unwarp is the same as in two dimensions. The through-plane axis is phase
+encoded too, one partition per echo of the train, but each partition is read at a spin
+echo, where the refocusing pulse has undone the static off-resonance phase, so the
+through-plane axis is displaced by nothing; what the echo train does to it is the T2
+window ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)), not the field.
+
+A stack of spirals has no phase-encode axis in the plane. Each interleaf starts at the
+center of k-space at its echo and spirals outward for 5 ms, so a spin at $\Delta f$ has
+accrued a phase $2\pi\,\Delta f\,\tau$ by the time the trajectory reaches the radius it
+samples at time $\tau$: the phase error is a function of the k-space radius, not of one
+axis, and the point-spread function of an off-resonant voxel is the transform of that
+radial phase ramp, a blur that spreads in every direction with a faint ring around it
+{cite:p}`noll1991b`. Nothing moves; edges soften, most where the field is largest. The
+simulator reconstructs the spiral by density-weighted least squares on the nominal
+trajectory, as its sidecar's `Reconstruction` block says, with no field map, so the blur is
+baked into the magnitude image it writes.
+
+```{code-cell} python
+:tags: [hide-input]
+ds3 = data.load_dataset("readout-3d")
+r3 = {name: ds3.run(name) for name in ("grase-4shot", "grase-4shot-fieldmap", "spiral", "spiral-fieldmap")}
+pg, ps = r3["grase-4shot-fieldmap"].sidecar(), r3["spiral-fieldmap"].sidecar()
+rog, ros = pg["AslscanSimulation"]["Readout"], ps["AslscanSimulation"]["Readout"]
+TRT3 = pg["TotalReadoutTime"]
+print(f"4-shot GRASE: line spacing {rog['LineSpacingMs']} ms over {rog['KySegments']} ky segments -> EffectiveEchoSpacing {pg['EffectiveEchoSpacing'] * 1e3:.3f} ms; "
+      f"TotalReadoutTime {TRT3 * 1e3:.3f} ms (= {pg['EffectiveEchoSpacing'] * 1e3:.3f} ms x 67 line intervals); PhaseEncodingDirection {pg['PhaseEncodingDirection']}; "
+      f"{rog['NumberShots']} shots, {rog['EchoTrainLength']} echoes of {rog['LinesPerEcho']} lines, echo spacing {rog['EchoSpacingMs']} ms")
+print(f"displacement at 100 Hz: 4-shot GRASE {100 * TRT3:.2f} voxel; the single-shot reference protocol ({presets.REFERENCE.total_readout_time * 1e3:.0f} ms) "
+      f"{100 * presets.REFERENCE.total_readout_time:.1f}; sdc ({TRT * 1e3:.0f} ms) {100 * TRT:.1f}")
+print(f"spiral: {ros['Interleaves']} interleaves of {ros['Trajectory']['ReadoutTimeMs']} ms ({ros['Trajectory']['SamplesPerInterleaf']} samples at {ros['Trajectory']['DwellTimeMs'] * 1e3:.0f} us), "
+      f"sidecar TotalReadoutTime {ps.get('TotalReadoutTime')}, PhaseEncodingDirection {ps.get('PhaseEncodingDirection')}; "
+      f"phase accrued by the end of an interleaf at the field peak ({field[mask].max():.0f} Hz): {field[mask].max() * ros['Trajectory']['ReadoutTimeMs'] * 1e-3:.2f} cycle")
+print("spiral reconstruction:", ros["Reconstruction"]["Method"])
+ctx3 = r3["grase-4shot"].context()
+mag3 = {name: r.mag().astype(float)[:64] for name, r in r3.items()}   # the spiral's 68 x 68 matrix pads the phantom's 64 columns with empty ones
+print(f"spiral columns beyond the GRASE grid hold brain: {r3['spiral'].mask()[64:].any()}; tissue fractions identical on the common grid: "
+      f"{np.array_equal(r3['spiral'].fractions()['gm'][:64], runs['undistorted'].fractions()['gm'])}")
+ctrl3 = {name: m[..., [i for i, c in enumerate(ctx3) if c == "control"]].mean(-1) for name, m in mag3.items()}
+dm3 = {name: quant.subtract(m, ctx3).mean(-1) for name, m in mag3.items()}
+wm99 = runs["undistorted"].fractions()["wm"] > 0.99
+resid = lambda name: (mag3[name][wm99] - mag3[name][wm99].mean(-1, keepdims=True)).ravel()
+print(f"each field-map run shares its twin's noise realization (correlation of the pure-white-matter residuals: GRASE {np.corrcoef(resid('grase-4shot'), resid('grase-4shot-fieldmap'))[0, 1]:.5f}, "
+      f"spiral {np.corrcoef(resid('spiral'), resid('spiral-fieldmap'))[0, 1]:.5f}), so every difference below is the field's doing")
+```
+
+The sidecar carries the quarter directly: an `EffectiveEchoSpacing` of 0.075 ms, the
+0.3 ms line spacing over four segments, and a `TotalReadoutTime` of 5.025 ms, so 100 Hz
+moves the GRASE image 0.50 voxel where the single-shot reference protocol moves it 2.0 and
+the `sdc` runs 3.5. The spiral sidecar has neither key, because there is no axis to
+apply them to; what it has is a 5 ms interleaf, over which a spin at the lobe's peak of
+114 Hz turns 0.57 of a cycle, and a reconstruction description that names no field map.
+Each field-map run was simulated with its twin's seed, and the pure-white-matter residuals
+of the two correlate to 0.99995 for the GRASE and 0.99974 for the spiral, so the differences
+that follow are the field's effect alone, not noise.
+
+```{code-cell} python
+:tags: [hide-input]
+twin, fm = ctrl3["grase-4shot"], ctrl3["grase-4shot-fieldmap"]
+in_slice = lambda k: mask & (np.arange(20)[None, None, :] == k)
+print(f"4-shot GRASE control image, RMS difference of the field-map run from its twin: {rms(fm, twin):.0f} units over the brain, {rms(fm, twin, in_slice(K)):.0f} in slice {K} "
+      f"(the 2D sdc ap run against undistorted: {rms(ctrl['ap'], ctrl['undistorted']):.0f} and {rms(ctrl['ap'], ctrl['undistorted'], in_slice(K)):.0f})")
+times = {"2.5": 0.5, "5.0 (the sidecar)": 1, "10": 2, "20 (single shot)": 4, "35 (sdc)": 7}
+misfit = {t: rms(distort(twin, -field * TRT3 * f), fm) for t, f in times.items()}
+print("twin distorted by -Δf x readout time, RMS difference from the field-map run: " + "; ".join(f"{t} ms {v:.0f}" for t, v in misfit.items())
+      + f"; +Δf x 5.0 ms (the wrong sign) {rms(distort(twin, +field * TRT3), fm):.0f}")
+
+
+def crossing(c, frac, lo=35, hi=60):
+    """Where a profile falls through `frac` of its plateau (the maximum over c[lo:hi]) beyond `lo`, by linear interpolation."""
+    level = frac * c[lo:hi].max()
+    j = np.where(c[lo:] > level)[0].max() + lo
+    return j + (c[j] - level) / (c[j] - c[j + 1])
+
+
+print(f"anterior brain edge along column x = {col}, slice {K} (half-maximum crossing): twin at row {crossing(twin[col, :, K], 0.5):.2f}, field-map run at {crossing(fm[col, :, K], 0.5):.2f} "
+      f"-> moved {crossing(fm[col, :, K], 0.5) - crossing(twin[col, :, K], 0.5):+.2f} voxel; -Δf x TotalReadoutTime is {-field[col, int(round(crossing(twin[col, :, K], 0.5))), K] * TRT3:+.2f} at that row, "
+      f"{-field[col, :, K].max() * TRT3:+.2f} at the lobe's peak; 20-80 % edge width {crossing(twin[col, :, K], 0.2) - crossing(twin[col, :, K], 0.8):.2f} -> {crossing(fm[col, :, K], 0.2) - crossing(fm[col, :, K], 0.8):.2f} voxels")
+fig, axes = plt.subplots(1, 4, figsize=(12.5, 3.2))
+show_slice(axes[0], fm, K, "4-shot GRASE with the field", vmin=0, vmax=7500); outline(axes[0])
+show_slice(axes[1], fm - twin, K, "field-map run − twin", kind="diff", vmin=-1500, vmax=1500)
+show_slice(axes[2], distort(twin, -field * TRT3) - twin, K, "twin distorted by −Δf·5 ms, − twin", kind="diff", vmin=-1500, vmax=1500)
+axes[3].plot([float(t.split()[0]) for t in times], list(misfit.values()), "o-", color=PALETTE[0])
+axes[3].set(xlabel="readout time in the model (ms)", ylabel="RMS misfit (image units)", title="which readout time explains the image")
+fig.tight_layout()
+```
+
+The GRASE field-map run differs from its twin by 77 units over the brain and 150 in
+slice 2, against 570 and 1100 for the 2D `sdc` run under the same field. The difference
+image has the shape of the 2D one, a posterior-anterior dipole at the frontal edge and the
+reverse at the temporal poles, at a fraction of the amplitude, and the twin distorted by
+$-\Delta f \times 5$ ms reproduces it: the misfit is 27 units at the sidecar's readout time,
+91 at twice it, 244 at the single-shot 20 ms and 483 at the `sdc` 35 ms, and the wrong sign
+at 5 ms gives 150, the same as no model at all. The displacement is the sidecar's, a
+quarter of a single shot's, with the 2D sign convention. The edge measurement along the
+column through the lobe is a coarser check: the half-maximum crossing moves 0.42 voxel
+posterior, where the field at that row predicts 0.27 and the lobe's peak 0.57, and the
+20-80 % edge width grows from 1.5 to 2.8 voxels, because the displacement shrinks toward
+the front of the lobe and stretches the edge, exactly as in the one-dimensional model
+earlier. Nothing has moved along $z$, as the spin-echo encoding of the partitions
+predicts.
+
+```{code-cell} python
+:tags: [hide-input]
+sp, spf = ctrl3["spiral"], ctrl3["spiral-fieldmap"]
+bands = ((0, 10), (10, 30), (30, 60), (60, 130))
+in_band = lambda lo, hi: mask & (np.abs(field) >= lo) & (np.abs(field) < hi)
+print("spiral control image, RMS difference of the field-map run from its twin by field band: "
+      + "; ".join(f"|Δf| {lo}-{hi} Hz {rms(spf, sp, in_band(lo, hi)):.0f} ({in_band(lo, hi).sum()} voxels)" for lo, hi in bands)
+      + "; the 4-shot GRASE in the same bands: " + ", ".join(f"{rms(fm, twin, in_band(lo, hi)):.0f}" for lo, hi in bands))
+print(f"whole brain {rms(spf, sp):.0f}; slice {K} {rms(spf, sp, in_slice(K)):.0f}; slice {phantom.DISPLAY_SLICE} {rms(spf, sp, in_slice(phantom.DISPLAY_SLICE)):.0f}; "
+      f"GM control signal {sp[gm].mean():.0f} -> {spf[gm].mean():.0f} in all GM, {sp[gm & (field > 60)].mean():.0f} -> {spf[gm & (field > 60)].mean():.0f} under the frontal lobe")
+steep = np.abs(np.gradient(sp, axis=0)) + np.abs(np.gradient(sp, axis=1))   # how much structure the twin has to blur, in units per voxel
+for name, lobe in (("frontal lobe (Δf > 60 Hz)", mask & (field > 60)), ("temporal lobes (Δf < −60 Hz)", mask & (field < -60))):
+    print(f"{name}: {lobe.sum()} voxels, RMS difference spiral {rms(spf, sp, lobe):.0f}, GRASE {rms(fm, twin, lobe):.0f}; the twin's in-plane intensity gradient there {steep[lobe].mean():.0f} units/voxel")
+fig, axes = plt.subplots(1, 4, figsize=(12.5, 3.2))
+show_slice(axes[0], sp, K, "spiral, no field", vmin=0, vmax=7500); outline(axes[0])
+show_slice(axes[1], spf, K, "spiral with the field", vmin=0, vmax=7500); outline(axes[1])
+show_slice(axes[2], spf - sp, K, f"difference, slice {K}", kind="diff", vmin=-600, vmax=600)
+show_slice(axes[3], spf - sp, phantom.DISPLAY_SLICE, f"difference, slice {phantom.DISPLAY_SLICE}", kind="diff", vmin=-600, vmax=600)
+fig.colorbar(axes[3].images[0], ax=axes[3], shrink=0.75, label="image units")
+fig.tight_layout()
+```
+
+In the spiral images nothing has moved: the outline sits on both. What the field did is in the
+difference image, and it is not where the 2D or the GRASE artifact was largest. The frontal
+lobe, where the field peaks, is nearly blank except for a spot at the midline edge above the
+sinus, and the strong pattern sits at the two temporal poles: a dark core along the inside
+of the lateral brain edge with a bright rim outside it, the blur of a sharp edge. Slice 9,
+where the field is a few hertz, is blank. The RMS difference climbs with the field band,
+from 7 units where $|\Delta f| < 10$ Hz to 146 above 60 Hz, against 27 and 267 for the
+GRASE in the same voxels, and the two lobes split differently for the two readouts: under
+the frontal lobe the spiral differs from its twin by 79 units and the GRASE by 279, under the
+temporal lobes by 218 and 245. The displacement moves everything the field covers, the
+blur only changes an image where there is structure to smear, and the frontal peak sits
+inside tissue whose intensity changes by 304 units per voxel, the temporal lobes on the brain
+edge where it changes by 861. The gray matter signal under the frontal lobe is unchanged,
+5168 against 5179.
+
+```{code-cell} python
+:tags: [hide-input]
+jt = int(np.unravel_index(np.argmin(field[:, :, K]), field.shape[:2])[1])   # the row through the temporal pole, where the field is most negative
+lateral = lambda c, frac: 63 - crossing(c[::-1], frac, 32, 54)             # the left brain edge along a row, in x
+print(f"anterior edge along column x = {col}, slice {K}, spiral: half-maximum crossing {crossing(sp[col, :, K], 0.5):.2f} -> {crossing(spf[col, :, K], 0.5):.2f} "
+      f"({crossing(spf[col, :, K], 0.5) - crossing(sp[col, :, K], 0.5):+.2f} voxel); 20-80 % edge width {crossing(sp[col, :, K], 0.2) - crossing(sp[col, :, K], 0.8):.2f} -> {crossing(spf[col, :, K], 0.2) - crossing(spf[col, :, K], 0.8):.2f} voxels")
+print(f"left temporal edge along row y = {jt} ({field[int(round(lateral(sp[:, jt, K], 0.5))), jt, K]:.0f} Hz at the edge): spiral crossing {lateral(sp[:, jt, K], 0.5):.2f} -> {lateral(spf[:, jt, K], 0.5):.2f}, "
+      f"width {lateral(sp[:, jt, K], 0.8) - lateral(sp[:, jt, K], 0.2):.2f} -> {lateral(spf[:, jt, K], 0.8) - lateral(spf[:, jt, K], 0.2):.2f} voxels; "
+      f"GRASE crossing {lateral(twin[:, jt, K], 0.5):.2f} -> {lateral(fm[:, jt, K], 0.5):.2f}, width {lateral(twin[:, jt, K], 0.8) - lateral(twin[:, jt, K], 0.2):.2f} -> {lateral(fm[:, jt, K], 0.8) - lateral(fm[:, jt, K], 0.2):.2f}")
+print(f"spiral difference along that row at x = 5 to 14: {np.round(spf[5:15, jt, K] - sp[5:15, jt, K]).astype(int)}")
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.2), sharey=True)
+panels = ((twin, fm, y, lambda a: a[col, :, K], field[col, :, K], (30, 67), "row y (posterior → anterior)", f"4-shot GRASE, column x = {col}"),
+          (sp, spf, y, lambda a: a[col, :, K], field[col, :, K], (30, 67), "row y (posterior → anterior)", f"spiral, column x = {col}"),
+          (sp, spf, np.arange(64), lambda a: a[:, jt, K], field[:, jt, K], (0, 25), "column x (left → right)", f"spiral, row y = {jt}, temporal pole"))
+for ax, (a, b, xs, pick, f, xlim, xlabel, title) in zip(axes, panels):
+    ax.plot(xs, pick(a), color=INK["secondary"], ls=":", lw=1.5, label="no field")
+    ax.plot(xs, pick(b), color=PALETTE[0], label="with the field")
+    ax.set(xlim=xlim, xlabel=xlabel, title=f"{title}, slice {K}")
+    sec = ax.twinx(); sec.plot(xs, f, color=PALETTE[3], lw=0.8); sec.set_ylim(-150, 150)
+    sec.set_ylabel("field (Hz)", color=PALETTE[3]) if ax is axes[-1] else sec.set_yticks([])
+axes[0].set_ylabel("mean control (image units)"); axes[0].legend(loc="lower left")
+fig.tight_layout()
+```
+
+The profiles put the two mechanisms side by side. Along the column through the frontal
+lobe the GRASE curve is the dotted one shifted and stretched where the field rises; the
+spiral curve is the dotted one with its corners rounded, the frontal edge's half-maximum
+crossing at the same row to 0.04 voxel and its 20-80 % width grown from 1.64 to 1.82
+voxels. Along the row through the temporal pole, where the field is −68 Hz on the brain
+edge itself, the spiral's crossing is unchanged to 0.01 voxel while its width grows from
+1.32 to 1.59, and the difference along the row alternates in sign from one voxel to the
+next, +619, −326, +294, −109: the ring of the off-resonance point-spread function, an
+overshoot that a sharp edge turns into a visible fringe. The GRASE's lateral edge does not
+widen at all (1.28 to 1.25), because its displacement is along $y$, not $x$. Blur has no
+sign to read from a sidecar and no reversed polarity to pair it with; its magnitude is set
+by the field and the interleaf duration, and the places it shows are the places with edges.
+
+```{code-cell} python
+:tags: [hide-input]
+m0_3 = {name: r.m0scan().astype(float)[:64] for name, r in r3.items()}
+cbf3 = {name: quant.cbf_pcasl(dm3[name], m0_3[name], r3[name].sidecar()["PostLabelingDelay"], tau=r3[name].sidecar()["LabelingDuration"]) for name in r3}
+frontal, temporal = gm & (field > 60), gm & (field < -60)
+print(f"frontal gray matter under the +120 Hz lobe (Δf > 60 Hz, GM fraction > 0.7): {frontal.sum()} voxels, truth {truth[frontal].mean():.1f}; temporal under the −90 Hz lobes (Δf < −60 Hz): {temporal.sum()} voxels")
+print(f"{'field-map run vs its twin':>26} {'ΔM RMS diff, frontal GM':>24} {'all GM':>7} {'CBF RMS diff, frontal':>22} {'temporal':>9} {'CBF RMSE vs truth, frontal: twin -> field':>42} {'frontal mean':>14}")
+pairs = (("grase-4shot-fieldmap", "grase-4shot", dm3, cbf3), ("spiral-fieldmap", "spiral", dm3, cbf3), ("2D sdc ap", "undistorted", dm, cbf))
+for a, b, d_, c_ in pairs:
+    a_ = "ap" if a == "2D sdc ap" else a
+    print(f"{a:>26} {rms(d_[a_], d_[b], frontal):>24.1f} {rms(d_[a_], d_[b], gm):>7.1f} {rms(c_[a_], c_[b], frontal):>22.1f} {rms(c_[a_], c_[b], temporal):>9.1f} "
+          f"{quant.score(c_[b], truth, frontal)['rmse']:>20.1f} -> {quant.score(c_[a_], truth, frontal)['rmse']:<18.1f} {c_[b][frontal].mean():>5.1f} -> {c_[a_][frontal].mean():.1f}")
+emptied = frontal & (m0["ap"] < 0.5 * np.median(m0["undistorted"][frontal]))
+print(f"the 2D CBF difference is the M0 division's: {emptied.sum()} of the {frontal.sum()} frontal voxels hold less than half the typical M0 in the ap scan "
+      f"(the tissue moved away; minimum {m0['ap'][frontal].min():.0f} against {m0['undistorted'][frontal].min():.0f} undistorted); without them the RMS difference is {rms(cbf['ap'], cbf['undistorted'], frontal & ~emptied):.1f}")
+fig, axes = plt.subplots(1, 6, figsize=(16, 2.9), layout="constrained")
+for ax, name in zip(axes[:4], r3):
+    show_slice(ax, dm3[name], K, f"ΔM, {name}", vmin=0, vmax=60); gm_outline(ax)
+show_slice(axes[4], dm3["grase-4shot-fieldmap"] - dm3["grase-4shot"], K, "GRASE: field − twin", kind="diff", vmin=-15, vmax=15)
+show_slice(axes[5], dm3["spiral-fieldmap"] - dm3["spiral"], K, "spiral: field − twin", kind="diff", vmin=-15, vmax=15)
+fig.colorbar(axes[5].images[0], ax=axes[5], shrink=0.75, label="image units")
+```
+
+The four ΔM maps are the same perfusion image, and the difference images carry the two
+patterns at the scale of ΔM, about 30 units in gray matter: a dipole at the frontal edge and
+along the posterior rim for the GRASE, the temporal-pole blur and the midline spot for the
+spiral, with a speckle at every tissue edge in both from the shallow shim gradient's
+fraction-of-a-voxel shifts. In the 242 frontal gray matter voxels under the positive lobe
+the field-map runs differ from their twins by 2.1 ΔM units for the GRASE and 2.7 for the
+spiral, against 0.6 and 0.5 across all gray matter, and the 2D `sdc` run differs from its
+reference by 13.6 in the same voxels. In CBF the GRASE pair differs by 2.0 ml/100 g/min
+there and the spiral pair by 4.6, and 2.5 each under the temporal lobes; the 2D pair
+differs by 129, a number the M0 division manufactures: 26 of the 242 frontal voxels lie
+beyond the displaced brain edge of the `ap` run, where its M0 scan holds a fraction of the
+tissue value (as little as 64 image units against 4413) and the ratio explodes, and without
+them the difference is 14.7. Against the truth, both 3D twins already sit low
+in this thin cortex (47.9 against 56.4, the through-plane point-spread function and partial
+volume, [Chapter 12](./12-partial-volume.md)), and the field adds 0.3 ml/100 g/min to the
+GRASE's RMSE and 1.7 to the spiral's, with the regional mean moving by 0.3 and 1.4. A
+regional mean hides the spiral's blur as thoroughly as it hid the 2D displacement.
+
+What each readout needs from a pipeline follows from the mechanism. The GRASE needs the
+same unwarp as the 2D images, with the field map and the sidecar's `PhaseEncodingDirection`
+and `TotalReadoutTime`; that `TotalReadoutTime` is the effective one, already divided by the
+segment count, and it is the number the unwarp must use, not the line spacing times the
+line count. A reversed-polarity pair serves it as well as it serves EPI. The spiral cannot
+be unwarped, because nothing is displaced; its correction is a field map used inside the
+reconstruction, a conjugate-phase or time-segmented gridding that gives each sample's phase
+back before it is placed {cite:p}`noll1991b`, or the iterative model-based reconstruction
+that includes the field in the forward model {cite:p}`sutton2003`. Once the magnitude image
+is written, the blur is in it, and a pipeline that receives spiral magnitude images can
+only note that the frontal and temporal cortex is softened, not restore it. The simulator's
+spiral is an ideal trajectory with no gradient delays or eddy currents, an approximation its
+sidecar lists; on a scanner those add a second, field-independent blur that calibration of
+the trajectory, not a field map, removes.
+
 ## What this implies for acquisition
 
 - **Shorten the readout.** The displacement is proportional to `TotalReadoutTime`, so
   in-plane acceleration reduces it directly, at a cost in SNR that ASL feels more than most
   sequences ([Chapter 7](../02-labeling/07-acquisition-parameters.md)); partial Fourier
-  shortens the echo time but not the displacement. 3D readouts such as GRASE
-  {cite:p}`gunther2005` and stack-of-spirals distort differently and usually less along the
-  slow axis, which is one of the reasons the white paper prefers them {cite:p}`alsop2015`.
+  shortens the echo time but not the displacement.
+- **Or segment it.** 3D readouts such as GRASE {cite:p}`gunther2005,fernandezseara2005` and
+  stack-of-spirals {cite:p}`vidorreta2013` are among the reasons the white paper prefers 3D
+  {cite:p}`alsop2015`, and under the same field the measurements above put numbers on it:
+  the four-shot GRASE's displacement is the sidecar's 5 ms, a quarter of a single shot's,
+  and its field-map run differs from its twin by 77 image units where the 2D `sdc` run
+  differs by 570; the spiral displaces nothing and blurs instead, 146 units where the field
+  exceeds 60 Hz against the GRASE's 267, and only where there are edges to smear. In the
+  frontal gray matter ΔM the field costs the GRASE 2.1 units and the spiral 2.7 against
+  their twins, where the 2D run pays 13.6. The GRASE is corrected like EPI; the spiral only
+  in the reconstruction.
 - **Acquire the reversed polarity.** A few volumes with the blips reversed, or the M0 scan
   in both polarities, are enough to estimate the field; the ASL series is then corrected
   from its one polarity. A gradient-echo field map serves the same purpose if it is
@@ -454,4 +709,8 @@ Field-map-based correction {cite:p}`jezzard1995`; the reversed-polarity estimate
 field {cite:p}`andersson2003`; the metadata BIDS records for it {cite:p}`gorgolewski2016,clement2022`;
 the ASLPrep pipeline {cite:p}`adebimpe2022`, which applies these corrections through
 SDCFlows, the distortion-correction workflows that grew out of fMRIPrep
-{cite:p}`esteban2019`; the white paper's discussion of readouts {cite:p}`alsop2015`.
+{cite:p}`esteban2019`; the white paper's discussion of readouts {cite:p}`alsop2015`, the
+3D GRASE readout {cite:p}`gunther2005,fernandezseara2005` and the comparison of 2D and 3D
+readouts including the stack of spirals {cite:p}`vidorreta2013`; off-resonance in spiral
+imaging and its correction in the reconstruction, the conjugate-phase method
+{cite:p}`noll1991b` and the iterative field-corrected reconstruction {cite:p}`sutton2003`.

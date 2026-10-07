@@ -314,7 +314,15 @@ echo times give 43.7 to 43.8. The correction depends on a blood $T_2$ that is no
 and varies with oxygenation and hematocrit {cite:p}`zhao2007`, which is the argument for the short echo time
 the white paper recommends {cite:p}`alsop2015`: at 12 ms the whole factor is 1.08 and an error of 30 ms in
 $T_{2b}$ moves CBF by about 1 percent; at 60 ms the same error moves it by close to 7
-percent.
+percent. The correction also assumes that all of the label still has the blood's $T_2$ at
+the readout. In the `te-sweep` runs it does, because the simulator's default exchange is
+instantaneous in the sense that matters here: the label keeps the blood's $T_2$ wherever it
+is. With a finite exchange time, label that has entered the tissue decays with the
+tissue's shorter $T_2$, the measured ratio drifts less with TE than the two-$T_2$ formula
+predicts, and a single-echo calibration that divides by $e^{-\mathrm{TE}/T_{2b}}$ overcorrects.
+[Chapter 19](../05-advanced/19-frontiers.md) measures this on the `multi-te` dataset, in
+which the simulator's exchange model is switched on and three echoes of each excitation
+are read.
 
 ## See it: the CSF reference
 

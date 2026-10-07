@@ -368,7 +368,11 @@ third of the perfusion and a longer transit time, has a tSNR of 0.08 at the refe
 noise, an SNR of 0.4 after 30 pairs: white matter perfusion is not measurable voxel by
 voxel with this protocol, only as a regional average. The low sensitivity of ASL in white
 matter, with its lower perfusion and longer transit time, is the subject of
-{cite:t}`vanosch2009`.
+{cite:t}`vanosch2009`. In these four runs the only fluctuation is thermal, so the tSNR is
+the thermal SNR; in a real series the static signal also fluctuates with the heartbeat,
+breathing and slow drifts, and the tSNR falls below the thermal value by an amount that
+background suppression recovers. [Chapter 9](./09-background-suppression.md) measures that
+on the `physio` dataset.
 
 ## Measure it: the cost in CBF
 

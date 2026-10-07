@@ -88,7 +88,17 @@ run = data.load_dataset("ref-pcasl").run()            # or .run("sigma40") for m
 mag, ctx, p = run.mag(), run.context(), run.sidecar()  # images, rows, BIDS sidecar (+ AslscanSimulation)
 m0 = run.m0scan(); truth_cbf = run.truth("perfusion"); dm_gt = run.truth("deltam")
 fr = run.fractions(); mask = run.mask()               # GM/WM/CSF fraction of each voxel
+run.signed()                                          # mag * cos(phase): use under background suppression
+run.mag(echo=2); run.sidecar(echo=2); run.echoes()    # a multi-echo run (BIDS echo-N)
+run.mag(raw=True); run.raw_volumes()                  # a Hadamard run's encoded series (sourcedata)
+run.physio(); run.look_locker(); run.motion_events()  # the ground-truth TSVs of the optional features
+run.simulation()["Readout"]                           # a 3D run's resolved echo train; protocols.slice_offsets(p) == [0.0]
 ```
+
+A 3D run (GRASE or spiral) has no `SliceTiming`; every partition shares the slab's
+excitation, and a volume of `NumberShots` shots takes that many TRs (the NIfTI time step).
+The sidecar's `AslscanSimulation.EchoAmplitudes.KzModulation` is the k_z window whose inverse
+DFT is the through-plane point-spread function (Chapter 2).
 
 Image units: aslscan scales by `signal_scale = 100`, so a GM control voxel is ≈ 6200 and a
 GM ΔM ≈ 37 in the first slice at the reference timing (0.396 M0 units × 100 × the blood T2

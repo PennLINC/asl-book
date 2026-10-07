@@ -10,6 +10,7 @@ kernelspec:
 - **Built in this page:** the true poses replayed on the reference series, a rigid registration, an outlier rule, the SCORE algorithm, and a simplified SCRUB written in the page ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`motion`**: the reference series with random head jumps on six volumes (`random`), with a slow linear drift over the whole series (`drift`), and the jumps again under background suppression (`random-bgsup`), each with the true pose of every volume ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-motion)).
 - **`ref-pcasl`**: the same series without motion, simulated with the same seed, so that it is the motion-free version of `random` volume for volume ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
+- **`readout-3d`**: the four-shot 3D GRASE readout with a head movement between the shots of about a quarter of its volumes (`grase-4shot-shotmotion`, with the table of events) and the same series without them (`grase-4shot`, same seed) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout-3d)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 :::
@@ -22,6 +23,7 @@ After this chapter you can:
 - distinguish motion between the two volumes of a pair from motion between pairs, and say what each does to the mean perfusion image
 - register the volumes of an ASL series rigidly, check the poses against the truth, and see what registration leaves behind
 - state the two passes of the SCORE algorithm, run it on a CBF time series, and explain how SCRUB down-weights corrupted voxels instead of discarding volumes, what its structural prior adds, and why neither helps against slow drift
+- explain why a movement between the shots of a segmented 3D readout produces ghosts inside one volume rather than a displaced volume, measure them, and say why they are rejected rather than registered
 - choose acquisition settings that reduce the damage at the source
 
 ```{code-cell} python
@@ -32,7 +34,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import ndimage, optimize
 
-from aslbook import data, phantom, presets, quant
+from aslbook import data, phantom, plotting, presets, quant
 from aslbook.plotting import INK, PALETTE, set_style, show_slice
 
 set_style()
@@ -789,6 +791,184 @@ Suppression does not correct motion; it makes the artifact small enough that reg
 and rejection have little left to do, at the price of the factor 0.81 on the perfusion
 signal and of an M0 scan from elsewhere.
 
+## See it: motion between the shots of a segmented 3D readout
+
+Every run so far was 2D: a volume is twenty slices read 40 ms apart, and the simulator
+moves finished volumes, so a jump always lands *between* volumes. The segmented 3D readouts
+the white paper recommends {cite:p}`alsop2015` are built differently
+([Chapter 7](../02-labeling/07-acquisition-parameters.md)): the `grase-4shot` run reads
+each volume in four shots, each with its own labeling and one repetition time apart, and
+each shot reads every fourth phase-encode line of every partition. A head movement
+between two shots therefore does not move the whole image. The lines of the later shots
+belong to a displaced object, and the image is the sum of four interleaved k-space combs
+that no longer agree. A disagreement that repeats every fourth line of k-space is a
+periodic weighting, and a periodic weighting in k-space is a set of replicas in the
+image {cite:p}`wood1985`: with four segments, copies of the brain at FOV/4, FOV/2, and
+3FOV/4 along the phase-encode axis, whose amplitudes are the discrete Fourier transform
+of the four segment weights (the Nyquist ghost of
+[Chapter 13](./13-assembled-pipeline.md) is the two-segment case). The replicas land
+inside one volume, and no rigid registration of whole volumes can undo them.
+
+The `grase-4shot-shotmotion` run is `grase-4shot` with the `motion.within_volume` overlay
+(`simulation()["Motion"]["WithinVolume"]` in the sidecar, `run.motion_events()` for the
+table). Each shot of each volume has an event with probability `DropoutRate`; an event at
+shot $s$ adds a jump to the pose, drawn uniformly up to `JumpMm` and `JumpDeg`, which
+persists for the later shots of that volume, and multiplies the lines of shot $s$ by
+$1 - \mathtt{Severity}$, the simulator's stand-in for the signal a shot loses when the
+head moves during its echo train. That is an approximation on two counts: a real movement
+during a train dephases the echoes unevenly rather than scaling them, and the displaced
+shots are, as before, resampled finished images. The run shares its seed with
+`grase-4shot`, so the volumes without an event are the same volumes.
+
+```{code-cell} python
+:tags: [hide-input]
+ds3 = data.load_dataset("readout-3d")
+clean3, shot3 = ds3.run("grase-4shot"), ds3.run("grase-4shot-shotmotion")
+mag3 = {"clean": clean3.mag().astype(float), "shots": shot3.mag().astype(float)}
+ctx3, p3, ro3 = shot3.context(), shot3.sidecar(), shot3.simulation()["Readout"]
+wv = shot3.simulation()["Motion"]["WithinVolume"]
+events = shot3.motion_events()
+hit = sorted(int(v) for v in events["volume"].unique())
+still3 = [v for v in range(len(ctx3)) if v not in hit]
+pairs3 = quant.pair_indices(ctx3)
+hit_pairs = sorted(k for k, pr in enumerate(pairs3) if set(pr) & set(hit))
+mask3 = clean3.mask()
+print(f"{p3['NumberShots']} shots of {ro3['LinesPerEcho']} lines per echo, {p3['RepetitionTimePreparation']} s apart, so a volume takes {ro3['VolumeDuration']} s; "
+      f"an event per shot with probability {wv['DropoutRate']}, severity {wv['Severity']}, jumps up to {wv['JumpMm']} mm and {wv['JumpDeg']} degrees")
+print(f"{len(events)} events in {len(hit)} of {len(ctx3)} volumes, touching pairs {hit_pairs} ({len(hit_pairs)} of {len(pairs3)}); the {len(still3)} untouched volumes equal grase-4shot: "
+      f"{np.array_equal(mag3['clean'][..., still3], mag3['shots'][..., still3])}")
+for _, e in events.iterrows():
+    print(f"  volume {int(e.volume):>2} ({ctx3[int(e.volume)]:>7}): event at shot {int(e.shot)}, its lines x {e.attenuation}, jump {e.jump_x:+.2f} mm along x and {np.degrees(e.jump_rz):+.2f} degrees about z")
+far3 = ~ndimage.binary_dilation(mask3, iterations=3)
+q = mask3.shape[1] // 4                                       # FOV/4 along the phase-encode axis y
+zone4 = (np.roll(mask3, q, axis=1) | np.roll(mask3, -q, axis=1)) & far3
+zone2 = np.roll(mask3, 2 * q, axis=1) & far3
+shown = [("volume 10, no event", mag3["shots"][..., 10]), ("volume 16 of grase-4shot", mag3["clean"][..., 16]),
+         ("volume 16, event at shot 2", mag3["shots"][..., 16]), ("volume 5, event at shot 3", mag3["shots"][..., 5])]
+fig, axes = plt.subplots(2, 4, figsize=(12.5, 6.4))
+for col, (title, img) in enumerate(shown):
+    show_slice(axes[0, col], img, K, title, vmin=0, vmax=7000)
+    show_slice(axes[1, col], img, K, "ghost window (0-1000)", vmin=0, vmax=1000)
+    for z, c in ((zone4, PALETTE[1]), (zone2, PALETTE[2])):
+        axes[1, col].contour(plotting.take_slice(z.astype(float), K), levels=[0.5], colors=[c], linewidths=0.6)
+fig.tight_layout()
+```
+
+At an 8 % chance per shot, eight events hit eight of the 30 volumes, seven labels and one
+control, and with them eight of the 15 pairs; the 22 untouched volumes are bit for bit the
+volumes of `grase-4shot`. Volume 16, the control, had its event at shot 2: the head moved
+0.28 mm and 0.26° between the second and the third shot, so two of its four shots are
+displaced and the third shot's lines were halved. In the normal window the volume already
+looks wrong: copies of the brain above and below it, and the brain itself darker, since
+the signal the replicas carry is taken from it. Volume 5, a label whose event came at the
+last shot (0.70 mm and 0.80°), shows fainter copies. In the ghost window the untouched
+volume 10 shows the faint horizontal streaks of the readout direction and nothing in the
+outlined zones (orange, the brain shifted by FOV/4 in either direction; green, by FOV/2),
+while the affected volumes fill the zones. A brain that spans three quarters of the field
+of view is longer than FOV/4, so the three replicas overlap one another and the brain,
+which is why the zones overlap too and why the visible copies are not three clean brains.
+
+```{code-cell} python
+:tags: [hide-input]
+pct = lambda img, z: 100 * img[z].mean() / img[mask3].mean()
+for title, img in shown:
+    print(f"{title:>27}: brain mean {img[mask3].mean():5.0f}; signal in the FOV/4 zone {pct(img, zone4):4.1f} %, in the FOV/2 zone {pct(img, zone2):4.1f} % of the brain mean")
+
+def reweight(img, w):
+    """The complex image whose interleaved k_y segments carry the weights w[0..3] (the simulator's
+    segment-to-shot order, checked by the printed residual)."""
+    F = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(img, axes=1), axis=1), axes=1)
+    W = np.asarray(w, float)[(-np.arange(img.shape[1])) % 4]
+    return np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(F * W[None, :, None], axes=1), axis=1), axes=1)
+
+ph3 = {"clean": clean3.phase().astype(float), "shots": shot3.phase().astype(float)}
+cplx = lambda name, v: mag3[name][..., v] * np.exp(1j * ph3[name][..., v])
+for v, w in ((16, [1, 1, 1 - wv["Severity"], 1]), (5, [1, 1, 1, 1 - wv["Severity"]])):
+    model = np.abs(reweight(cplx("clean", v), w))                 # the attenuation alone, no displacement
+    actual = mag3["shots"][..., v]
+    print(f"volume {v}, the clean volume with shot {w.index(min(w))}'s lines x {min(w)} and no displacement: FOV/4 zone {pct(model, zone4):.1f} %, FOV/2 zone {pct(model, zone2):.1f} %; "
+          f"RMS over the brain of the measured volume minus this model {rms(actual, model):.0f}, minus the clean volume {rms(actual, mag3['clean'][..., v]):.0f} image units")
+d3 = {name: quant.subtract(m, ctx3) for name, m in mag3.items()}
+fig, axes = plt.subplots(1, 3, figsize=(9.5, 3.3))
+show_slice(axes[0], mag3["shots"][..., 16] - mag3["clean"][..., 16], K, "volume 16: with event − without", kind="diff", vmin=-2000, vmax=2000)
+show_slice(axes[1], d3["shots"][..., 8], K, "pair 8 (volumes 16, 17): ΔM", kind="diff", vmin=-2000, vmax=2000)
+show_slice(axes[2], d3["shots"][..., 3], K, "pair 3 (volumes 6, 7): ΔM, ×20", kind="diff", vmin=-100, vmax=100)
+fig.colorbar(axes[1].images[0], ax=axes[1], shrink=0.75, label="image units")
+fig.tight_layout()
+```
+
+The zones quantify what the eye saw. Outside the brain the untouched volume and the clean
+twin of volume 16 read 1.4 % of the brain mean in the FOV/4 zone and 0.7 % in the FOV/2
+zone, the noise floor and the readout streaks. Volume 16 reads 37.2 and 38.3 %, volume 5
+17.1 and 16.8 %, and their brain means fell from 5790 to 4013 and 5328. The second set of
+numbers says where the ghost comes from at these jump sizes. Taking the clean volume 16
+and halving the lines of its third segment, with no displacement at all, gives 37.1 and
+38.3 %: the halved shot alone accounts for the zones, and the measured volume differs from
+that model by 29 units RMS over the brain, against 1861 from the clean volume (for volume
+5, 28 against 567). A segment makes a ghost in proportion to how much it disagrees with
+the other three. A segment of a head displaced by a fraction of a millimeter and a
+fraction of a degree disagrees by the rim this chapter has measured, a few percent of the
+brain at its edges; a segment halved by the simulator's `Severity` of 0.5 disagrees by
+half the brain everywhere, and the ghosts here are mostly that choice. The two volumes
+also show why the shot matters: halving one shot gives one pattern of replicas, halving
+another gives the same amplitudes with other phases, and where the overlapping replicas
+add rather than cancel the zones read twice as much. The difference images carry all of
+it. Volume 16 minus its clean twin (left) is the replicas plus the rim, and pair 8, whose
+control is volume 16 and whose label is untouched, has a ΔM image that is three ghosts of
+the brain on a signal of 35 (middle), where pair 3, a pair without an event, is noise with
+a brain in it at twenty times the contrast (right).
+
+```{code-cell} python
+:tags: [hide-input]
+scale3 = presets.REFERENCE.signal_scale * np.exp(-p3["EchoTime"] / presets.T2_BLOOD)
+truth3 = shot3.truth("deltamStatic")[..., [l for _, l in pairs3]].mean(-1) * scale3
+rms3 = lambda a: np.sqrt(np.mean((a - truth3)[inner] ** 2))
+keep3 = np.array([k not in hit_pairs for k in range(len(pairs3))])
+dev3, dev3c = deviation(d3["shots"]), deviation(d3["clean"])
+med3 = np.median(dev3); z3 = (dev3 - med3) / (1.4826 * np.median(np.abs(dev3 - med3)))
+print(f"deviation of each pair's ΔM from the mean (RMS over the brain): grase-4shot {dev3c.min():.1f} to {dev3c.max():.1f}; shot-motion run, "
+      f"the {(~keep3).sum()} pairs with an event {', '.join(f'{dev3[k]:.0f}' for k in hit_pairs)}, the {keep3.sum()} pairs without {dev3[keep3].min():.0f} to {dev3[keep3].max():.0f}")
+keep_r, _ = reject_pairs(d3["shots"])
+plds3 = np.full((1, 1, mask3.shape[2]), p3["PostLabelingDelay"])          # a 3D readout: one delay for the slab
+cbf3 = np.stack([quant.cbf_pcasl(d3["shots"][..., k], shot3.m0scan().astype(float), plds3, tau=p3["LabelingDuration"]) for k in range(len(pairs3))], -1)
+keep_s, first, second, V, _ = score(cbf3)
+g3 = cbf3[tissue["gm"]].mean(0)
+print(f"first pass of the page's rule: z-scores of the event pairs {', '.join(f'{z3[k]:.1f}' for k in hit_pairs)}, largest other {z3[keep3].max():.1f}; iterated, it rejects {np.flatnonzero(~keep_r).tolist()}")
+print(f"SCORE: gray matter CBF of the pairs {np.round(g3).astype(int).tolist()}; pass 1 rejects {first}, pass 2 rejects {second}; kept {keep_s.sum()}")
+print(f"mean ΔM RMSE against the truth (gray matter ΔM {truth3[gm].mean():.0f}): grase-4shot {rms3(d3['clean'].mean(-1)):.1f}; shot-motion run, all 15 pairs {rms3(d3['shots'].mean(-1)):.1f}, "
+      f"the {keep_r.sum()} the rule keeps {rms3(d3['shots'][..., keep_r].mean(-1)):.1f}, the {keep_s.sum()} SCORE keeps {rms3(d3['shots'][..., keep_s].mean(-1)):.1f}, "
+      f"the {keep3.sum()} without an event {rms3(d3['shots'][..., keep3].mean(-1)):.1f} (the same {keep3.sum()} of grase-4shot {rms3(d3['clean'][..., keep3].mean(-1)):.1f})")
+```
+
+In `grase-4shot` every pair deviates from the mean difference image by 12.1 to 12.3
+units, the noise of a 3D readout ([Chapter 7](../02-labeling/07-acquisition-parameters.md)).
+In the shot-motion run the eight pairs with an event deviate by 362 to 2097 and the seven
+without by 254, because the mean they are compared with carries the ghosts of the other
+eight. The mean of all 15 pairs misses the truth by 254.0 units RMS, seven times the gray
+matter signal of 35, where `grase-4shot` misses by 4.7. The page's rule finds the pairs
+even though they are more than half the series, but not at once: at its first pass only
+the three loudest stand out, at $z$-scores of 8.0, 8.0 and 11.0, while four event pairs
+sit at $z = 0.0$ and the clean pairs at $-0.7$, because with eight corrupted pairs the
+median deviation *is* a corrupted pair's. Each removal cleans the mean and sharpens the
+scale, and the iteration ends at exactly the eight event pairs. SCORE does worse here, for
+the same reason: its first pass is a single pass on the gray matter CBF, which is 643 to
+2598 ml/100 g/min for the event pairs (−2508 for pair 8, whose halved shot belongs to the
+control) against 49 for the clean ones, but the median absolute deviation it scales by is
+set by a corrupted pair, so only the three extreme pairs exceed 2.5 of it; the second
+pass removes three more by their correlation with the mean map and then stops, when
+removing the next pair no longer lowers the within-tissue variance, leaving pairs 5 and 13
+in. SCORE's nine pairs miss the truth by 78.9 units; the seven the page's rule keeps, the
+seven without an event, miss it by 5.9, what the same seven pairs of `grase-4shot` give.
+The lesson is the one the random run taught in reverse: a rule built on a median needs a
+clean majority, and the page's rule survives without one only because it re-estimates
+after every removal. At an 8 % chance per shot, an event in any of four shots still
+touched 8 of 15 pairs, and a protocol with segmented volumes must budget for that. What
+no rule can do is repair a volume: there is no pose to undo, and the corrupted segment is
+a quarter of k-space. Prospective correction, which re-measures the head's position before
+each shot and steers the next one {cite:p}`maclaren2013`, or a reconstruction that
+re-weights or re-acquires the bad shot, is the scanner's job, and a pipeline's job is to
+find the volume and drop it.
+
 ## What this implies for acquisition
 
 - **Background suppression is the single most effective setting.** It reduces the motion
@@ -800,6 +980,12 @@ signal and of an M0 scan from elsewhere.
   and a few percent of noise; a protocol with ten pairs cannot spare four.
 - **Record and report the motion.** The pose estimates are the quality metric; framewise
   displacement {cite:p}`power2012` summarizes them, and the rejected pairs belong beside it.
+- **A segmented 3D readout turns motion within a volume into ghosts.** A jump between two
+  shots of `grase-4shot-shotmotion` put copies of the brain at FOV/4 and FOV/2 inside one
+  volume, which no registration undoes, and an 8 % chance of an event per shot touched 8
+  of 15 pairs. Keep the shots few and short, use background suppression so that the
+  ghosts, like the rim, scale with a small static signal, and expect to reject such
+  volumes rather than register them.
 - **Padding, instruction, and short scans** reduce motion at the source; no correction
   matches a subject who did not move.
 
@@ -810,4 +996,5 @@ mean-and-SD filter {cite:p}`tan2009` to SCORE {cite:p}`dolui2017`, SCRUB
 {cite:p}`dolui2016`, and the motion-sorted exclusion of ENABLE {cite:p}`shirzadi2018`; the
 robust statistics behind SCRUB {cite:p}`huber1964,beaton1974,holland1977`; the pipeline order in ASLPrep {cite:p}`adebimpe2022` and ExploreASL
 {cite:p}`mutsaerts2020`; framewise displacement {cite:p}`power2012`; the white paper
-{cite:p}`alsop2015`.
+{cite:p}`alsop2015`; ghosts from inconsistent k-space segments {cite:p}`wood1985` and
+prospective motion correction {cite:p}`maclaren2013`.

@@ -18,8 +18,10 @@ wsl -e bash -lc "cd /mnt/c/Users/tsalo/Documents/linc/asl-book/pipelines && micr
 
 Outputs land in `../data/<dataset-id>/<run>/`, one BIDS dataset per run exactly as aslscan
 wrote it (with its `sub-01/perf/ground-truth`), plus `derivatives/aslbook` with the GM/WM/CSF
-fraction of every acquisition voxel. Each run takes about 8 s on the 20-slice slab; the whole
-table simulates in under ten minutes.
+fraction of every acquisition voxel. A 2D or 3D GRASE run takes about 8 s on the 20-slice
+slab, a Hadamard run under a minute, and a stack-of-spirals run several minutes (its
+reconstruction is iterative); the whole table simulates in under an hour. A multi-echo run
+passes one sidecar per echo (`asl.json`, `asl-echo-2.json`, ...) as repeated `--asl-json`.
 
 Tools the scripts expect: the `aslscan` binary built with `--features cli,kspace,par` at the
 commit pinned in the configuration (its `../mrsim-acq` checkout at the pinned commit too).

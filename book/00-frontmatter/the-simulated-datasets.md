@@ -57,10 +57,10 @@ ax.set_axis_off()
 inp, stage, out, truth = "#8a8a8a", PALETTE[0], PALETTE[2], PALETTE[1]
 box(ax, 0.1, 3.95, 2.3, 4.85, "protocol", "BIDS sidecar +\naslcontext.tsv", inp)
 box(ax, 0.1, 2.75, 2.3, 3.65, "phantom", "perfusion, transit time,\nT1, T2, T2*, M0, labels\nper 1 mm voxel", inp)
-box(ax, 0.1, 1.55, 2.3, 2.45, "overlay", "noise, coils, suppression\nefficiency, motion, ...", inp)
-box(ax, 3.0, 2.15, 5.1, 3.85, "1. kinetics", "the general kinetic model:\nthe label-control difference\nin every voxel at every\nvolume's and slice's timing", stage)
-box(ax, 5.5, 2.15, 7.6, 3.85, "2. signal", "tissue: saturation recovery\nat TR (or the suppression\ntimeline); blood: the\ndifference, signed per row", stage)
-box(ax, 8.0, 2.15, 10.1, 3.85, "3. acquisition", "2D spin-echo EPI: k-space,\nT2/T2* decay, field map,\ncoils, GRAPPA, ringing,\nghosts, noise, motion", stage)
+box(ax, 0.1, 1.55, 2.3, 2.45, "overlay", "noise, coils, 3D train,\nsuppression model, motion,\nphysiology, exchange, ...", inp)
+box(ax, 3.0, 2.15, 5.1, 3.85, "1. kinetics", "the general kinetic model\n(with exchange, an arterial\ncompartment, sub-boli if asked)\nat every volume's and slice's timing", stage)
+box(ax, 5.5, 2.15, 7.6, 3.85, "2. signal", "tissue: the steady state at TR\nor the suppression timeline;\nblood: the signed difference;\nphysiological factors", stage)
+box(ax, 8.0, 2.15, 10.1, 3.85, "3. acquisition", "2D EPI, 3D GRASE or a stack\nof spirals: k-space, T2 decay,\nfield map, coils, GRAPPA,\nringing, ghosts, noise, motion", stage)
 box(ax, 10.5, 2.15, 12.4, 3.85, "output data", "BIDS ASL series:\nmagnitude + phase,\naslcontext, sidecars,\nM0 scan", out)
 box(ax, 3.0, 0.15, 9.0, 1.35, "ground truth (the answer key)", "perfusion, transit time, T1, T2, M0, tissue labels and fractions, and the noise-free\ndifference of every volume, all on the acquisition grid, with no scanner in between", truth)
 arrow(ax, (2.3, 4.4), (4.05, 4.4)); arrow(ax, (4.05, 4.4), (4.05, 3.85))
@@ -158,29 +158,50 @@ For every phantom voxel and every volume of the series, the general kinetic mode
 {cite:t}`buxton1998` gives the label-control difference in longitudinal magnetization from
 the voxel's perfusion, transit time, T1, and M0, and from the protocol's labeling type,
 bolus duration, and post-labeling delay, evaluated at the time each 2D slice is actually
-read out (the delay plus the slice's offset in the readout). The result is exactly what the
-toy tier computes with `aslbook.kinetic.delta_m`.
+read out (the delay plus the slice's offset in the readout; a 3D readout reads every
+partition at one time). The result is exactly what the toy tier computes with
+`aslbook.kinetic.delta_m`. The same model, cut into parcels of labeled blood, gives the
+extensions some datasets switch on: a time-encoded labeling is a sum of sub-boli
+([Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md)); a finite exchange time
+splits the label into a part still in the capillary and a part in the tissue, and an
+arterial compartment adds the label passing through the voxel's arteries, which vascular
+crushing removes ([Chapter 19](../05-advanced/19-frontiers.md)); under the bolus-position
+suppression model each parcel is inverted only by the pulses it was inside the imaging
+region for ([Chapter 9](../03-preprocessing/09-background-suppression.md)); a Look-Locker
+readout depletes the label that has arrived at every readout
+([Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md)).
 :::
 
 :::{dropdown} The signal (Chapters 1, 6, and 9)
 Each tissue class is one compartment carrying the longitudinal magnetization of static
-tissue before the 90° excitation: the saturation-recovery steady state at the repetition
-time, or, under background suppression, the signed value after the inversion pulses. The
-labeled blood is a second compartment per class carrying the difference, negative on label
-rows and positive on `deltam` rows; under suppression it is multiplied by the pulses' factor.
-An included or separate M0 scan takes the plain steady state at its own repetition time.
+tissue before the excitation: the saturation-recovery steady state at the repetition time
+for a 90° spin-echo excitation, the spoiled steady state of a gradient-echo excitation at
+its flip angle, or, under background suppression, the signed value after the inversion
+pulses. The labeled blood is a second compartment per class carrying the difference,
+negative on label rows and positive on `deltam` rows; under suppression it is multiplied by
+the pulses' factor, and label that has exchanged into tissue joins the tissue compartment.
+Physiological noise, when a dataset asks for it, multiplies the tissue by a cardiac,
+respiratory and drift factor at each readout and the label by one averaged over the
+labeling. An included or separate M0 scan takes the plain steady state at its own
+repetition time.
 :::
 
 :::{dropdown} The acquisition (Chapters 2, 8, 10, 11, and 13)
 The compartment images are simulated on a grid twice as fine as the acquisition in-plane
-and acquired slice by slice as a single-shot spin-echo EPI: each compartment decays with its
-own T2 and T2' along the readout (the labeled blood with the T2 of blood), the field map
-displaces the image along the phase-encode axis, k-space is truncated to the acquisition
-matrix (so edges ring), partial Fourier, Nyquist ghosts, spikes, receive coils, GRAPPA
-{cite:p}`griswold2002`, and Gaussian noise are applied in k-space, and the image is reconstructed as magnitude and
-phase. Head motion moves the compartment images by a rigid pose before each volume is
-acquired. This stage is the shared `mrsim-acq` library, also used by the diffusion MRI
-simulator TRXScan.
+and acquired by one of three readouts. The reference is a 2D single-shot EPI, slice by
+slice: each compartment decays with its own T2 and T2' along the readout (the labeled blood
+with the T2 of blood), the field map displaces the image along the phase-encode axis,
+k-space is truncated to the acquisition matrix (so edges ring), partial Fourier, Nyquist
+ghosts, spikes, receive coils, GRAPPA {cite:p}`griswold2002`, and Gaussian noise are
+applied in k-space, and the image is reconstructed as magnitude and phase; a multi-echo
+series reads several echoes of the same excitation. A 3D GRASE readout excites the whole
+slab and reads one through-plane partition of k-space per spin echo of a refocusing train,
+each echo an EPI block, over one or several shots, with the echo amplitudes of the train
+(stimulated echoes included) weighting the partitions; a stack of spirals reads one spiral
+interleaf per echo instead and is reconstructed by a least-squares inversion of the
+trajectory. Head motion moves the compartment images by a rigid pose before each volume,
+or each shot of a segmented volume, is acquired. This stage is the shared `mrsim-acq`
+library, also used by the diffusion MRI simulator TRXScan.
 :::
 
 The output is a BIDS ASL dataset {cite:p}`gorgolewski2016,clement2022`: `part-mag` and `part-phase` images,
@@ -205,12 +226,14 @@ print(f"{r.n_pairs} control-label pairs ({2 * r.n_pairs * r.repetition_time / 60
 print(f"noise: variance {r.noise_variance:.0f} per component in image units (sigma {r.noise_variance ** 0.5:.0f}); gray matter control SNR about {presets.REFERENCE_GM_SNR:.0f}")
 ```
 
-The white paper prefers a 3D readout with background suppression; the simulator reads 2D
-slices, so the book treats the 2D-specific effects (slice timing in
-[Chapter 6](../02-labeling/06-the-asl-signal.md), the slice dependence of suppression in
-[Chapter 9](../03-preprocessing/09-background-suppression.md)) explicitly and discusses 3D
-readouts in [Chapters 7](../02-labeling/07-acquisition-parameters.md) and
-[19](../05-advanced/19-frontiers.md).
+The white paper prefers a segmented 3D readout with background suppression. The reference
+stays 2D so that the slice timing of [Chapter 6](../02-labeling/06-the-asl-signal.md) and
+the slice dependence of suppression in
+[Chapter 9](../03-preprocessing/09-background-suppression.md) are visible, and the same
+labeling is simulated with 3D GRASE and stack-of-spirals readouts in the `readout-3d`
+dataset, which [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) explains and
+[Chapters 7](../02-labeling/07-acquisition-parameters.md), [9](../03-preprocessing/09-background-suppression.md),
+[10](../03-preprocessing/10-motion.md) and [11](../03-preprocessing/11-susceptibility-distortion.md) compare with the 2D series.
 
 ## The datasets
 
@@ -256,6 +279,12 @@ for ds, entry in cfg["datasets"].items():
 | [`te-sweep`](../appendices/a-aslscan-cookbook.md#ds-te-sweep) | the echo time |
 | [`readout`](../appendices/a-aslscan-cookbook.md#ds-readout) | partial Fourier, a ghost, spikes |
 | [`kitchen-sink`](../appendices/a-aslscan-cookbook.md#ds-kitchen-sink) | everything at once |
+| [`readout-3d`](../appendices/a-aslscan-cookbook.md#ds-readout-3d) | 3D GRASE in one and four shots, a stack of spirals; each with suppression, a field map, physiology, shot motion |
+| [`physio`](../appendices/a-aslscan-cookbook.md#ds-physio) | physiological noise, without and with suppression |
+| [`hadamard`](../appendices/a-aslscan-cookbook.md#ds-hadamard) | time-encoded labeling, 2D and 3D, and its conventional multi-delay twin |
+| [`look-locker`](../appendices/a-aslscan-cookbook.md#ds-look-locker) | eight low-flip readouts after each pulsed label |
+| [`multi-te`](../appendices/a-aslscan-cookbook.md#ds-multi-te) | three echoes per excitation with a finite exchange time |
+| [`vascular`](../appendices/a-aslscan-cookbook.md#ds-vascular) | an arterial compartment at short delays, uncrushed and crushed |
 
 ## The ground truth
 
@@ -278,24 +307,34 @@ shown that a real brain is built the way the phantom assumes.
   time, and the boundary between tissues is not the only source of variation. A voxelwise
   score against the truth here measures noise and partial volume, not physiological
   heterogeneity ([Chapter 12](../03-preprocessing/12-partial-volume.md)).
-- **No arterial compartment and no dispersion.** The kinetic model delivers the label
-  straight into the tissue compartment as a sharp bolus. Real data show labeled blood still
-  in arteries at short delays {cite:p}`chappell2010`, and a bolus whose edges have blurred
-  in transit {cite:p}`hrabe2004,chappell2013`
+- **A sharp bolus, and an arterial compartment only when asked.** The kinetic model
+  delivers the label as a box with no dispersion of its edges in transit
+  {cite:p}`hrabe2004,chappell2013`. Labeled blood still in the voxel's arteries at short
+  delays {cite:p}`chappell2010` is modeled as a plug-flow arterial compartment with one
+  blood volume and arrival time per tissue, switched on by the `vascular` dataset only
   ([Chapter 5](../02-labeling/05-kinetic-model.md), [Chapter 19](../05-advanced/19-frontiers.md)).
-- **The label decays with the blood's T1 until it arrives, then with the tissue's.** There
-  is no exchange time and no restricted exchange {cite:p}`stlawrence2000,parkes2002`
-  ([Chapter 19](../05-advanced/19-frontiers.md)).
-- **Background suppression inverts the whole bolus.** Every pulse acts on all labeled
-  blood wherever it is; real pulses cover the imaging region, so the label still in transit
-  is inverted fewer times. The retained label in a suppressed dataset is an upper bound, and
-  the sidecar names the approximation ([Chapter 9](../03-preprocessing/09-background-suppression.md)).
+- **The label decays with the blood's T1 until it arrives, then with the tissue's.** By
+  default it exchanges into tissue instantly; a finite exchange time, switched on by the
+  `multi-te` dataset, decides only which T2 the label decays with at the echo time, not its
+  T1 {cite:p}`stlawrence2000,parkes2002` ([Chapter 19](../05-advanced/19-frontiers.md)).
+- **Background suppression inverts the whole bolus by default.** Under the global-bolus
+  model every pulse acts on all labeled blood wherever it is, which makes the retained label
+  an upper bound; the bolus-position model, which inverts each parcel only by the pulses it
+  was inside the imaging region for, is used by two runs of the `bgsup` dataset, and the
+  sidecar names the model ([Chapter 9](../03-preprocessing/09-background-suppression.md)).
 - **Motion moves finished images.** A rigid pose is applied to the simulated compartment
-  images of a volume; the field map does not move with the head, and the kinetics are not
-  re-evaluated after through-plane motion ([Chapter 10](../03-preprocessing/10-motion.md)).
-- **A 2D single-shot spin-echo EPI scanner.** No 3D readouts, no physiological noise, no
-  pulsatility, no vessel-selective or velocity-selective labeling
-  ([Chapter 19](../05-advanced/19-frontiers.md)).
+  images of a volume, or of each shot of a segmented 3D volume; the field map does not move
+  with the head, and the kinetics are not re-evaluated after through-plane motion
+  ([Chapter 10](../03-preprocessing/10-motion.md)).
+- **An ideal 3D slab.** The 3D readouts excite exactly the field of view in z, with no slab
+  profile and no through-plane aliasing; the echo train's longitudinal state is not carried
+  into the next repetition; the coils are uniform in z; a 3D gradient-echo train is not
+  modeled ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)).
+- **Physiological noise is global and off by default.** The cardiac, respiratory and drift
+  factors are the same in every voxel at a given time, which is the part of physiological
+  noise that scales with the static signal; there is no pulsatile arterial volume and no
+  spatial structure ([Chapter 9](../03-preprocessing/09-background-suppression.md)).
+- **No vessel-selective or velocity-selective labeling** ([Chapter 19](../05-advanced/19-frontiers.md)).
 - **The readout is not neutral at edges.** The truth maps are box averages of the phantom,
   but the images pass through a truncated k-space, so even the noise-free difference rings
   by about a unit around tissue boundaries and sits about 2 % above the truth in pure gray

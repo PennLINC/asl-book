@@ -3,8 +3,11 @@
 Arterial spin labeling executable book, built with Jupyter Book 2 (mystmd). Figures come from
 small in-notebook simulations (the kinetic model and signal equations evaluated on a packaged
 phantom slab) and from simulated datasets produced offline by
-[aslscan](https://github.com/PennLINC/aslscan); every perfusion estimate is scored against the
-analytic ground truth of the same simulated brain.
+[aslscan](https://github.com/PennLINC/aslscan): 2D EPI, 3D GRASE and stack-of-spirals
+readouts, time-encoded, Look-Locker and multi-echo acquisitions, background suppression,
+motion, physiological noise, a field map, an arterial compartment and vascular crushing;
+every perfusion estimate is scored against the analytic ground truth of the same simulated
+brain.
 
 ## Quickstart
 

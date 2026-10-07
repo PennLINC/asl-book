@@ -262,8 +262,11 @@ estimate is much flatter, but not flat: the remaining slope, 45 to 38, is real a
 explained in the section on $T_1'$ below. The label in later slices has spent longer in
 tissue, decaying faster than the $T_{1b}$ correction assumes, so the correction is
 incomplete by the same mechanism that biases the whole map. A 3D readout has no slice
-timing (every slice is read at once), which is one of the reasons the white paper prefers
-it {cite:p}`alsop2015,vidorreta2013`.
+timing (every partition is read at the slab's one excitation, so `protocols.slice_offsets`
+returns zero and the nominal delay is every voxel's delay), which is one of the reasons the
+white paper prefers it {cite:p}`alsop2015,vidorreta2013`;
+[Chapter 7](../02-labeling/07-acquisition-parameters.md) measures the flat profile on the
+3D GRASE run of the same labeling.
 
 ## Measure it: CBF against the truth
 

@@ -559,12 +559,16 @@ omits matter in real data:
 - **Macrovascular signal.** Label still in an artery at readout is counted as if it had
   perfused the voxel, a large bright spurious signal at delays below the transit time.
   Vascular crushing or a longer delay removes it, and a multi-delay fit can model it as a
-  separate arterial component {cite:p}`chappell2010`; the simulator has no arterial
-  compartment, so its `pld05` run is cleaner than a real one.
+  separate arterial component {cite:p}`chappell2010`. The simulator adds such a compartment
+  only when a dataset asks for it, so the `pld-sweep` runs of this chapter are cleaner than
+  real short-delay data; the `vascular` dataset of
+  [Chapter 19](../05-advanced/19-frontiers.md) switches it on, with and without crushing.
 - **Restricted exchange.** Water crosses the capillary wall in a finite time, and meanwhile
   the label decays with $T_{1b}$, not $T_1'$ {cite:p}`stlawrence2000,zhou2001,parkes2002`; multi-echo ASL
   ([Chapter 19](../05-advanced/19-frontiers.md)) can measure the exchange time because the
-  two compartments also differ in $T_2$ {cite:p}`gregori2013`.
+  two compartments also differ in $T_2$ {cite:p}`gregori2013`. The simulator's exchange
+  model (the `multi-te` dataset) decides which $T_2$ each part of the label decays with and
+  keeps this chapter's $T_1'$ for both parts, so the `deltam` truth stays this model's.
 - **One T1 per tissue.** $T_{1b}$ varies by about 10 % between subjects with hematocrit and
   oxygenation {cite:p}`lu2004,hales2016`, which enters CBF as an equal error ([Chapter 16](../04-quantification/16-calibration.md)).
 

@@ -7,9 +7,11 @@ kernelspec:
 
 :::{admonition} Simulated datasets in this chapter
 :class: note
-- **Built in this page:** single-voxel signals from the kinetic model of [Chapter 5](../02-labeling/05-kinetic-model.md), extended in the page with a second compartment, a dispersion kernel, an arterial term, and a 3D echo train ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **Built in this page:** single-voxel signals from the kinetic model of [Chapter 5](../02-labeling/05-kinetic-model.md), extended in the page with a second compartment, a dispersion kernel and an arterial term ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **`multi-te`**: PCASL with a water exchange time of 0.5 s, three echoes of every excitation: a spin-echo readout at 24, 48 and 72 ms with PLD 1.0 s (`se-pld10`), and a gradient-echo readout at 60 degrees at 12, 33 and 54 ms with PLD 1.0 s (`ge-pld10`) and 1.8 s (`ge-pld18`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-multi-te)).
+- **`vascular`**: the reference labeling at seven delays from 0.1 to 1.8 s, read with the four-shot 3D GRASE, without an arterial compartment (`none`), with one (`uncrushed`: 2 % of a gray matter voxel, 0.8 % of white matter, arriving 0.3 s before the tissue's label) and with it under vascular crushing at VENC 4 cm/s (`crushed`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-vascular)).
 
-None of the methods of this chapter is simulated by aslscan; the last section says what adding each would take.
+Three of this chapter's methods are now simulated by aslscan: multi-echo readouts with exchange, the arterial compartment with crushing (both here), and the 3D readouts ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)); the last section says what adding the rest would take.
 :::
 
 ## Learning goals
@@ -20,10 +22,12 @@ After this chapter you can:
   readouts, dispersion and macrovascular models, and learned processing each add to the
   chain this book has followed
 - explain, with a simulation, why a velocity-selective label is insensitive to transit
-  time, why the echo-time decay of ΔM reads the exchange of label into tissue, and why a
-  segmented 3D GRASE readout blurs through-plane
+  time and why the echo-time decay of ΔM reads the exchange of label into tissue
+- measure the fraction of the label still in blood from three echoes of the `multi-te`
+  runs, and say why it falls between a delay of 1.0 and 1.8 s
 - state the bias that dispersion and arterial signal produce in a standard multi-delay
-  fit, and what a model that includes them has to add
+  fit, measure it on the `vascular` runs, and say what vascular crushing removes and what
+  it leaves
 - say what aslscan does not model and how each omission would be added
 
 ```{code-cell} python
@@ -33,11 +37,12 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from scipy.stats import gamma as gamma_dist
 
-from aslbook import kinetic, presets
-from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, set_style
+from aslbook import data, kinetic, phantom, presets, quant
+from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, set_style, show_slice
 
 set_style()
-GM = presets.TISSUES["GM"]
+GM, WM = presets.TISSUES["GM"], presets.TISSUES["WM"]
+K = phantom.DISPLAY_SLICE
 SCALE = presets.REFERENCE.signal_scale
 T1B, LAM = presets.T1_BLOOD, presets.LAMBDA
 M0B = GM.m0 / LAM
@@ -263,92 +268,155 @@ quantification. [Chapter 16](../04-quantification/16-calibration.md) assumed the
 the blood's $T_2$ at the echo time, which is also aslscan's assumption; at a late readout
 most of the label has exchanged, the difference signal at TE = 30 ms is 13 to 18 % smaller
 than that assumption predicts, and CBF is underestimated by the same amount. At the
-reference echo time of 12 ms the error is less than half of that. The transfer of water from
-blood to tissue is also a quantity of interest in itself, and it is what the multi-TE
-measurement of {cite:t}`gregori2013` set out to map.
+reference echo time of 12 ms the error is less than half of that.
+
+The simulator's exchange model, switched on in the `multi-te` dataset, is simpler than the
+toy's two compartments. It is a single pass: label that arrived in the voxel at time $t'$
+has crossed into the tissue by time $t$ with probability $1 - e^{-(t - t')/T_\mathrm{ex}}$,
+irreversibly, and the kinetic model's $T_1'$ applies to both parts, so the total `deltam`
+is exactly the curve of [Chapter 5](../02-labeling/05-kinetic-model.md) and only the
+transverse decay is split: the part still in the capillary (`deltamIntravascular`) decays
+with the blood's $T_2$ and the exchanged remainder with the tissue's. The toy's compartments
+also differ in $T_1$, the blood's 1.65 s against $T_1'$, which is why its total was close
+to, but not exactly, the instant-exchange curve. Three runs with an exchange time of 0.5 s
+read three echoes of every excitation: a spin-echo readout at 24, 48 and 72 ms with a
+delay of 1.0 s, and a gradient-echo readout at 60 degrees at 12, 33 and 54 ms with a delay
+of 1.0 s and of 1.8 s. The cell takes the mean difference in pure gray and pure white
+matter (fraction at least 0.95) at each echo and compares it with the truth's two parts
+decayed to the echo time. In the gradient-echo runs the decays are the $T_2^*$ ones; the
+blood compartment has no $T_2^*$ of its own in the phantom, so the simulator gives it the
+blood's $T_2$ and the tissue's $T_2'$, and the label carries the excitation's
+$\sin 60^\circ$, which cancels in every ratio. The cell then fits the three measured points
+with the two known exponentials and reads the intravascular fraction from the two
+amplitudes.
+
+```{code-cell} python
+:tags: [hide-input]
+RUN_TITLES = {"se-pld10": "spin echo, PLD 1.0 s", "ge-pld10": "gradient echo, PLD 1.0 s", "ge-pld18": "gradient echo, PLD 1.8 s"}
+mte = data.load_dataset("multi-te")
+echoes = {}
+for name, title in RUN_TITLES.items():
+    run = mte.run(name)
+    p = run.sidecar(echo=1)
+    sim = p["AslscanSimulation"]
+    tes = np.array(sim["MultiEcho"]["EchoTimes"])
+    ge = sim["MultiEcho"]["EchoFormation"] == "gradient"
+    label_gain = np.sin(np.deg2rad(p["FlipAngle"])) if ge else 1.0      # a gradient echo reads sin(a) ΔM
+    ctx, fr = run.context(), run.fractions()
+    lab = [i for i, r in enumerate(ctx) if r == "label"]
+    total = run.truth("deltam")[..., lab].mean(-1)
+    iv = run.truth("deltamIntravascular")[..., lab].mean(-1)
+    meas = np.stack([quant.subtract(run.mag(echo=e), ctx).mean(-1) for e in run.echoes()], -1)
+    print(f"{name} ({title}): TE {np.round(1e3 * tes).astype(int)} ms, exchange time {sim['Exchange']['ExchangeTime']} s, "
+          f"model '{sim['Exchange']['Model']}'")
+    for tname, tis in (("GM", GM), ("WM", WM)):
+        roi = fr[tname.lower()] >= 0.95
+        t2t = tis.t2star if ge else tis.t2
+        t2b = 1 / (1 / T2_B + 1 / tis.t2prime) if ge else T2_B
+        e_b, e_t = np.exp(-tes / t2b), np.exp(-tes / t2t)
+        m, sem = meas[roi].mean(0), meas[roi].std(0) / np.sqrt(roi.sum())
+        f_true = iv[roi].mean() / total[roi].mean()
+        dm0 = SCALE * label_gain * total[roi].mean()                      # ΔM(TE = 0) in image units
+        a_b, a_t = np.linalg.lstsq(np.stack([e_b, e_t], 1), m, rcond=None)[0]
+        echoes[name, tname] = (tes, m, sem, f_true, t2b, t2t, dm0)
+        print(f"  {tname} (decay constants: blood {1e3 * t2b:.0f} ms, tissue {1e3 * t2t:.0f} ms): measured {np.round(m, 1)} ± {sem.mean():.1f}, "
+              f"predicted {np.round(dm0 * (f_true * e_b + (1 - f_true) * e_t), 1)}; fraction in blood fitted {a_b / (a_b + a_t):.3f}, truth {f_true:.3f}")
+```
+
+```{code-cell} python
+:tags: [hide-input]
+te_axis = np.linspace(0, 0.08, 161)
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.3), sharey=True)
+for ax, (name, title) in zip(axes, RUN_TITLES.items()):
+    tes, m, sem, f_true, t2b, t2t, dm0 = echoes[name, "GM"]
+    ax.plot(1e3 * te_axis, np.exp(-te_axis / t2b), color=PALETTE[7], ls="--", lw=1, label=f"all in blood ({1e3 * t2b:.0f} ms)")
+    ax.plot(1e3 * te_axis, np.exp(-te_axis / t2t), color=TISSUE_COLORS["GM"], ls="--", lw=1, label=f"all in tissue ({1e3 * t2t:.0f} ms)")
+    ax.plot(1e3 * te_axis, f_true * np.exp(-te_axis / t2b) + (1 - f_true) * np.exp(-te_axis / t2t), color=INK["secondary"], lw=1.2,
+            label=f"truth: {100 * f_true:.1f} % in blood")
+    ax.errorbar(1e3 * tes, m / dm0, yerr=sem / dm0, fmt="o", color=PALETTE[0], ms=5, capsize=3, label="measured, pure GM")
+    ax.set(xlabel="echo time (ms)", yscale="log", title=f"{name}: {title}")
+    ax.legend(fontsize=7)
+axes[0].set_ylabel("ΔM(TE) / ΔM(0)")
+fig.tight_layout()
+```
+
+The measured gray-matter points fall on the curve the truth predicts, between the two
+limiting decays, and the two-exponential fit returns the fraction of the label still in
+blood: 0.124 against a truth of 0.125 in the spin-echo run at a delay of 1.0 s, 0.125
+against 0.125 in the gradient-echo run at the same delay, and 0.026 against 0.025 at 1.8 s.
+An exchange time of 0.5 s lies in the range the toy swept, and the two delays show why
+the readout time decides whether it can be measured: at 1.0 s the first slices read
+2.8 s after the start of labeling, when the bolus has only just finished arriving and
+an eighth of the label is fresh enough to be still in the capillary; at 1.8 s almost all of
+it has exchanged, and a fraction of 2.5 % is at the edge of what three echoes resolve. In
+the gradient-echo runs the blood compartment's effective constant is 115 ms against the
+tissue's 66 ms (printed), a smaller contrast than the spin echo's 165 against 80 ms, and
+the fit still succeeds because the pure gray matter signal is large. White matter is the
+opposite case. Its bolus, with a transit time of 1.2 s, is still arriving when the first
+slices read, so a larger share of its label is intravascular, 0.179 at 1.0 s and 0.037 at
+1.8 s by the truth; but the pure white matter signal is a sixth of gray matter's, its two
+decay constants are closer (110 against 165 ms in the spin echo, 53 against 63 ms in the
+gradient echo), and the fitted fractions, printed negative, are meaningless. A multi-echo
+measurement of exchange is a gray matter measurement at short delays. The measured points
+sit about 2 % above the prediction in gray matter and a few percent below it in white
+matter at every echo, an offset the reference series shares and that comes from the
+acquisition grid at the cortical ribbon ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)),
+not from the exchange model; being the same at every echo, it cancels in the fit.
+
+```{code-cell} python
+:tags: [hide-input]
+for name, title in RUN_TITLES.items():
+    tes, m, sem, f_true, t2b, t2t, dm0 = echoes[name, "GM"]
+    true_decay = f_true * np.exp(-tes / t2b) + (1 - f_true) * np.exp(-tes / t2t)
+    blood_only = np.exp(-tes / t2b)
+    print(f"{title}, GM: ΔM(TE)/ΔM(TE₁) measured {np.round(m / m[0], 3)}, blood decay alone {np.round(blood_only / blood_only[0], 3)}; "
+          "a calibration that gives all of the label the blood's constant underestimates ΔM(0), and CBF, by "
+          + ", ".join(f"{100 * (1 - true_decay[i] / blood_only[i]):.0f} % at {1e3 * te:.0f} ms" for i, te in enumerate(tes)))
+```
+
+This is the calibration message for [Chapter 16](../04-quantification/16-calibration.md),
+now measured. The single-echo correction divides the difference by $e^{-\mathrm{TE}/T_{2\mathrm{b}}}$,
+as if the whole label still had the blood's $T_2$; here the label has mostly exchanged and
+decays faster, so the measured ratio between the first and the last echo is 0.577 in the
+spin-echo run where the blood's decay alone would give 0.748. Divided by the blood factor,
+the difference comes out too small, and CBF with it: by 13 % at 24 ms and 32 % at 72 ms in
+the spin-echo run, and by 7 % at 12 ms and 29 % at 54 ms in the gradient-echo run at the
+reference delay. The error is the price of a long echo time, and the shortest echo the
+readout allows keeps it below a tenth, which is the white paper's recommendation for a
+different reason. The transfer of water from blood to tissue is also a quantity of
+interest in itself: it is what the multi-TE measurement of {cite:t}`gregori2013` set out to
+map, and what {cite:t}`ohene2021` used to detect a higher permeability of the blood-brain
+barrier to water in the aging brain.
 
 ## 3D readouts
 
 The white paper recommends a segmented 3D readout with background suppression
-{cite:p}`alsop2015`, and the book's 2D EPI reference protocol is the simulator's limit, not
-the field's practice. The recommendation names two 3D readouts. 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
-excites the whole slab, then follows a train of refocusing pulses, each spin echo carrying
-an EPI readout of one through-plane partition of k-space ($k_z$); a stack of spirals does
-the same with a spiral trajectory in each partition. Both read every voxel at the same
-time after the label, which removes the slice timing of
-[Chapter 6](../02-labeling/06-the-asl-signal.md) and lets a single pair of background
-suppression pulses null the whole volume, and both have the SNR of a volume excitation. The
-cost is the echo train: the partitions are acquired one spin echo apart, and the signal
-decays with $T_2$ across the train, so the $k_z$ axis is weighted by a decaying window,
-whose Fourier transform is a through-plane point-spread function wider than one partition.
-Centric ordering puts $k_z = 0$ at the first echo and the decay on the edges of k-space, so
-the effect is blur rather than signal loss; a single-shot train over 20 partitions lasts
-longer than $T_2$, which is why the readout is segmented across several excitations
-{cite:p}`vidorreta2013`.
+{cite:p}`alsop2015`: 3D GRASE {cite:p}`gunther2005,fernandezseara2005`, which excites the
+whole slab and follows it with a train of refocusing pulses, each spin echo carrying an EPI
+readout of one through-plane partition of k-space ($k_z$), or a stack of spirals, which
+does the same with a spiral trajectory in each partition. Both are simulated by aslscan,
+and [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) measures them on the
+`readout-3d` dataset: every partition is read at the same time after the label, which
+removes the slice timing of [Chapter 6](../02-labeling/06-the-asl-signal.md) and lets one
+pair of suppression pulses null the whole volume; the echo train's amplitudes, which the
+simulator computes from an extended phase graph and writes to the sidecar, form the $k_z$
+window whose inverse transform is the through-plane point-spread function, and Chapter 2
+measures the blur that window produces on the phantom; segmenting the train across several
+shots shortens it and narrows the point-spread function, at the cost of one labeling per
+shot and of motion between the shots; and the volume's noise is $1/\sqrt{n_z}$ of a 2D
+acquisition's at the same noise variance, because every echo reads the whole slab, which is
+the SNR advantage the comparison of readouts measured in vivo {cite:p}`vidorreta2013`. This
+chapter therefore keeps no 3D toy of its own; the `vascular` runs below use the four-shot
+GRASE so that every voxel shares each delay.
 
-```{code-cell} python
-:tags: [hide-input]
-N_KZ, ESP = 20, 0.030                                        # partitions; s per spin echo
-
-
-def kz_window(t2, n_segments):
-    """Weight of each k_z partition from T2 decay along a centric-ordered echo train shared by the segments."""
-    kz = np.arange(-N_KZ // 2, N_KZ // 2)
-    order = np.argsort(np.abs(kz - 0.25))                    # 0, -1, 1, -2, 2, ... : centric
-    echo = np.empty(N_KZ)
-    echo[order] = np.arange(N_KZ) // n_segments               # echo index of each partition
-    return kz, np.exp(-(echo + 1) * ESP / t2), (echo + 1) * ESP
-
-
-def psf(window, pad=16):
-    """Through-plane point-spread function of a k_z window (zero-padded in the center of k-space)
-    and the full width at half maximum of its main lobe, in slices."""
-    big = np.zeros(pad * N_KZ)
-    start = pad * N_KZ // 2 - N_KZ // 2
-    big[start:start + N_KZ] = window
-    p = np.abs(np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(big))))
-    z = np.fft.fftshift(np.fft.fftfreq(pad * N_KZ, d=1.0 / N_KZ))   # slices
-    p /= p.max()
-    c = np.argmax(p)
-    left, right = c, c
-    while p[left - 1] >= 0.5:
-        left -= 1
-    while p[right + 1] >= 0.5:
-        right += 1
-    return z, p, z[right] - z[left]
-
-
-configs = [("single shot", 1), ("2 segments", 2), ("4 segments", 4)]
-fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11, 3.3))
-for (name, seg), color in zip(configs, PALETTE[:3]):
-    kz, w, te = kz_window(GM.t2, seg)
-    ax0.plot(kz, w, "o-", ms=4, color=color, label=f"{name}: train {N_KZ // seg * ESP * 1e3:.0f} ms")
-    z, p, fwhm = psf(w)
-    ax1.plot(z, p, color=color, label=f"{name}: FWHM {fwhm:.2f} slices")
-    print(f"{name:12s}: echo train {N_KZ // seg * ESP * 1e3:4.0f} ms, k_z edge weight {w.min():.3f}, through-plane FWHM {fwhm:.2f} slices (tissue T2 {1e3 * GM.t2:.0f} ms)")
-z, p, fwhm_b = psf(kz_window(presets.T2_BLOOD, 1)[1])
-ax1.plot(z, p, color=PALETTE[7], ls="--", lw=1, label=f"single shot, blood T2: FWHM {fwhm_b:.2f}")
-ax0.set(xlabel="k_z partition", ylabel="weight from T2 decay", title=f"the k_z window of a centric 3D GRASE train, {ESP * 1e3:.0f} ms per echo, T2 {1e3 * GM.t2:.0f} ms")
-ax0.legend(fontsize=7)
-ax1.set(xlabel="through-plane position (slices)", ylabel="point-spread function", xlim=(-4, 4), title="what a point becomes along z")
-ax1.legend(fontsize=7)
-fig.tight_layout()
-print(f"single shot with the label's T2 of {1e3 * presets.T2_BLOOD:.0f} ms: FWHM {fwhm_b:.2f} slices")
-```
-
-Left: the weight each $k_z$ partition receives in a centric-ordered train, for the book's
-20 partitions at 30 ms per echo. In a single shot the outer partitions are read 600 ms
-after excitation and keep a thousandth of the gray-matter signal; with four segments the
-train is 150 ms and the edge keeps 15 %. Right: the resulting through-plane point-spread
-function, whose main-lobe widths are printed. A single-shot train at this echo spacing
-blurs a point over several slices; segmentation narrows it toward the 1.1 slices of an
-unweighted window, at the cost of one excitation, and therefore one label, per segment,
-and of sensitivity to motion between segments. The
-dashed curve is the same single-shot train for the label's longer $T_2$: the label and the
-static tissue are blurred by different amounts, so the subtraction of a 3D GRASE pair is
-not exactly the tissue-free difference the 2D chapters assumed. Stack-of-spirals readouts
-have the same $k_z$ window with a spiral's own in-plane blurring from off-resonance in
-place of EPI's displacement.
+What the 3D model still leaves out is listed in each run's sidecar under
+`Readout.Approximations`. The slab is ideal, exactly the field of view in z with a uniform
+profile and no $k_z$ aliasing, where a real slab has an edge profile and is oversampled in z
+to keep its wrap out of the image. The train is a spin-echo train, so there is no 3D
+gradient-echo readout, which a multi-echo or Look-Locker acquisition with a 3D readout
+would need. The train leaves $M_z = 0$ at the excitation and its longitudinal state is not
+carried to the next repetition. And the coils are uniform in z. These return as rows of the
+table at the end of the chapter.
 
 ## Bolus dispersion and the macrovascular signal
 
@@ -494,6 +562,159 @@ $\delta_\mathrm{a}$ become two more maps, well determined only where the short-d
 samples are many and clean. Time-encoded acquisitions, whose earliest delays are short,
 need one of the three.
 
+The `vascular` dataset switches the arterial compartment on in the simulator. It is the
+toy's arterial term with no dispersion: the label in a voxel's arteries is a plug-flow
+compartment, $2\alpha\,(M_0/\lambda)\,a\mathrm{BV}\,e^{-\delta_\mathrm{a}/T_{1\mathrm{b}}}$
+while the bolus passes the voxel's arteries, $\delta_\mathrm{a} \le t < \delta_\mathrm{a} + \mathrm{LD}$,
+and zero otherwise, so that it is present while the delay is shorter than the arterial
+arrival and vanishes abruptly after it, with $a\mathrm{BV}$ 2 % of a gray matter voxel and
+0.8 % of a white matter one, and $\delta_\mathrm{a}$ 0.5 and 0.9 s, 0.3 s before the
+tissue's transit time {cite:p}`chappell2010`. The reference labeling is read at seven
+delays from 0.1 to 1.8 s, four pairs each, with the four-shot 3D GRASE of
+[Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) so that every voxel shares
+each delay, three times: without the compartment (`none`), with it (`uncrushed`), and with
+it under vascular crushing at VENC 4 cm/s (`crushed`), whose surviving fraction of the
+arterial signal the simulator computes from a laminar velocity distribution and writes to
+the sidecar. The cell takes the mean difference in pure gray and white matter at each delay
+and compares the gray matter values with the truths, `deltam` plus `deltamArterial` times
+the survival, scaled by 100 times the label's first-echo amplitude as in Chapter 5 and by
+the ratio measured in the `none` run, which carries the through-plane point-spread function
+of the 3D readout.
+
+```{code-cell} python
+:tags: [hide-input]
+vasc = data.load_dataset("vascular")
+RUN_COLORS = {"none": INK["secondary"], "uncrushed": PALETTE[7], "crushed": PALETTE[0]}
+curves, at_03, fit_inputs = {}, {}, {}
+for name in RUN_COLORS:
+    run = vasc.run(name)
+    p, ctx, sim, fr = run.sidecar(), run.context(), run.simulation(), run.fractions()
+    diff = quant.subtract(run.mag(), ctx)
+    pld_pair = quant.pld_of_pairs(p, ctx)
+    plds = np.unique(pld_pair)
+    by_delay = np.stack([diff[..., pld_pair == v].mean(-1) for v in plds], -1)
+    lab = [i for i, r in enumerate(ctx) if r == "label"]
+    dm = run.truth("deltam")[..., lab]
+    art = run.truth("deltamArterial")[..., lab] if name != "none" else np.zeros_like(dm)
+    survival = sim["VascularCrushing"]["Survival"][0] if p["VascularCrushing"] else [1.0, 1.0]   # per tissue, GM then WM
+    amp = sim["EchoAmplitudes"]["PerEcho"]["blood"][0]                                            # the label at the first echo
+    for j, tname in enumerate(("GM", "WM")):
+        roi = fr[tname.lower()] >= 0.95
+        truth = np.stack([(dm + survival[j] * art)[..., pld_pair == v].mean(-1) for v in plds], -1)
+        curves[name, tname] = (plds, by_delay[roi].mean(0), SCALE * amp * truth[roi].mean(0))
+    at_03[name] = np.where(run.mask(), by_delay[..., plds == 0.3][..., 0], np.nan)
+    m0 = quant.m0_correction(run.m0scan(), tr=run.m0scan_sidecar()["RepetitionTimePreparation"], te=p["EchoTime"])
+    fit_inputs[name] = (by_delay, plds, m0, fr, run.truth("perfusion"), run.truth("att"), p["LabelingDuration"])
+readout_factor = (curves["none", "GM"][1] / curves["none", "GM"][2]).mean()
+print(f"delays {plds} s; label amplitude at the first echo {amp:.3f}; measured / predicted ΔM in pure GM of the none run {readout_factor:.3f} "
+      f"(the 3D readout's through-plane point-spread function); survival of the arterial signal under crushing: GM {survival[0]:.3f}, WM {survival[1]:.3f}")
+for name in RUN_COLORS:
+    plds, m, t = curves[name, "GM"]
+    print(f"{name:9s} GM ΔM per delay: measured {np.round(m, 1)}, predicted {np.round(readout_factor * t, 1)}; arterial truth at PLD 0.3 s "
+          f"{(t[2] / (SCALE * amp) - curves['none', 'GM'][2][2] / (SCALE * amp)):.2f} M0 units against tissue {curves['none', 'GM'][2][2] / (SCALE * amp):.2f}")
+```
+
+```{code-cell} python
+:tags: [hide-input]
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.3))
+for ax, tname in zip(axes, ("GM", "WM")):
+    for name, color in RUN_COLORS.items():
+        plds, m, t = curves[name, tname]
+        ax.plot(plds, m, "o", color=color, label=f"{name}: measured")
+        if tname == "GM":
+            ax.plot(plds, readout_factor * t, "-", color=color, lw=1.2, alpha=0.8, label=f"{name}: truth × {readout_factor:.2f}")
+        else:
+            ax.plot(plds, m, "-", color=color, lw=1.2, alpha=0.8)
+    ax.set(xlabel="post-labeling delay (s)", ylabel="mean ΔM (image units)", title=f"pure {tname}: the arterial signal and its crushing")
+    ax.legend(fontsize=7)
+fig.tight_layout()
+```
+
+Left: pure gray matter. Without the compartment (gray) the difference follows the kinetic
+curve, scaled by the 0.92 the `none` run measures against its truth, which is the
+through-plane point-spread function of the 3D readout mixing the cortex with its neighbors
+([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). With it (red), the four
+delays below the arterial arrival of 0.5 s carry 236 to 245 image units where the tissue
+alone gives 56 to 64: the arterial compartment is 2.07 M0 units against the tissue's 0.71,
+three times the perfusion signal, from 2 % of the voxel's water, as the toy's peaks showed
+for 1 %. At 0.5 s it is gone, abruptly, because the simulator's bolus has no dispersion;
+the toy's dispersed arterial curve had a tail here. Crushing at VENC 4 cm/s (blue) leaves
+0.198 of it, the laminar average the sidecar states, so the crushed run still carries
+92 to 100 image units at the short delays, and from 0.5 s the three runs coincide. The
+lines are the truths scaled by the `none` run's factor, and they pass through the measured
+points of all three runs: the compartment and its crushing are what the sidecar says they
+are. Right: pure white matter, measured only. Its arterial arrival is 0.9 s, so its
+arterial signal persists through the 0.5 s delay and is gone at 1.0 s, and its crushing
+leaves 0.341, more than gray matter's, because the simulator's white matter arteries are
+slower (6 cm/s against 10). The white matter truths are not drawn: the point-spread
+function mixes the neighboring gray matter's arterial signal into these voxels, and a
+single factor does not describe it.
+
+```{code-cell} python
+:tags: [hide-input]
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.4))
+for ax, name in zip(axes, RUN_COLORS):
+    im = show_slice(ax, at_03[name], K, f"{name}: mean ΔM at PLD 0.3 s", kind="magnitude", vmin=0, vmax=250)
+fig.subplots_adjust(left=0.01, right=0.9, top=0.92, bottom=0.02, wspace=0.05)
+fig.colorbar(im, ax=axes.tolist(), shrink=0.8, label="image units")
+```
+
+The same at PLD 0.3 s on the display slice, one window. The arterial signal is in every
+gray matter voxel, because the phantom gives every gray matter voxel the same arterial
+blood volume; that is unlike a real brain, where the arterial blood volume is concentrated
+in the voxels that contain the larger arteries, the Sylvian fissures and the
+interhemispheric and basal cisterns, and the uncrushed short-delay image shows bright
+vessels on a dimmer cortex rather than a uniformly brighter cortex. The pattern the
+phantom cannot show is the one that makes the arterial signal recognizable by eye; its
+amount per voxel is what the fit sees, and that is what the next cell tests: the standard
+multi-delay fit of [Chapter 15](../04-quantification/15-multi-delay.md), with the labeling
+duration and M0 from the separate scan, to all seven delays of each run, scored in pure
+gray matter against the truth, and once more to the delays from 0.5 s on, which is the
+"avoid it" remedy.
+
+```{code-cell} python
+:tags: [hide-input]
+fits = {}
+for name in RUN_COLORS:
+    by_delay, plds, m0, fr, truth_cbf, truth_att, tau = fit_inputs[name]
+    perfused = fr["gm"] + fr["wm"]
+    pmask = perfused > 0.5
+    t1_map = np.divide(fr["gm"] * GM.t1 + fr["wm"] * WM.t1, perfused, out=np.zeros_like(perfused), where=perfused > 0)
+    cbf, att = quant.fit_multi_pld(by_delay, plds, m0, tau=tau, t1_tissue=t1_map, mask=pmask)
+    fits[name] = (cbf, att, pmask)
+    gm = fr["gm"] >= 0.95
+    late = plds >= 0.5
+    cbf_late, att_late = quant.fit_multi_pld(by_delay[..., late], plds[late], m0, tau=tau, t1_tissue=t1_map, mask=gm)
+    sc, sa = quant.score(cbf, truth_cbf, gm), quant.score(att, truth_att, gm)
+    print(f"{name:9s}: pure GM, all seven delays: CBF {cbf[gm].mean():.1f} ml/100 g/min (truth {truth_cbf[gm].mean():.1f}, bias {sc['bias']:+.1f}), "
+          f"ATT {att[gm].mean():.2f} s (truth {truth_att[gm].mean():.2f}, bias {sa['bias']:+.2f}; at the grid's lower edge of 0.2 s in {100 * (att[gm] <= 0.2001).mean():.0f} % of voxels); "
+          f"delays from 0.5 s only: CBF {cbf_late[gm].mean():.1f}, ATT {att_late[gm].mean():.2f} s")
+fig, axes = plt.subplots(2, 3, figsize=(11, 6.2))
+for j, name in enumerate(RUN_COLORS):
+    cbf, att, pmask = fits[name]
+    show_slice(axes[0, j], np.where(pmask, cbf, np.nan), K, f"{name}: fitted CBF", kind="cbf")
+    show_slice(axes[1, j], np.where(pmask, att, np.nan), K, f"{name}: fitted ATT", kind="att")
+fig.tight_layout()
+```
+
+The fits are the toy's bias, measured. Without the compartment the standard model
+recovers 60.5 ml/100 g/min and 0.79 s in pure gray matter, the baseline of this readout
+and this fit. With the uncrushed compartment it returns 128.5 ml/100 g/min and an arrival
+of 0.20 s, the lower edge of the fit's grid in every gray matter voxel: four samples three
+times too high at the short delays are explained as a large perfusion arriving as early
+as the model allows, and the maps (red run, top and bottom middle) are uniformly wrong,
+not noisy, because every gray matter voxel carries the same arterial signal. The crushed
+run sits between the two in the way that matters for practice: its CBF, 60.0, is back at
+the baseline, since a fifth of the arterial signal at four of the seven delays is not
+enough to pull the amplitude, but its arrival, 0.30 s, is still half a second early, and
+the ATT map (bottom right) is as uniformly wrong as the uncrushed one. Crushing protects
+the perfusion estimate before it protects the transit-time estimate. Dropping the delays
+below 0.5 s restores both for all three runs (printed): 61.3 and 0.75 s for the uncrushed
+data, 61.1 and 0.78 s for the crushed, which is the white paper's long delay in multi-delay
+form. The third remedy, a model with the arterial term, has in this phantom the easiest
+possible case, a compartment that is the same in every voxel and switches off at one
+instant; a real one is dispersed, and the toy above shows what that does to the fit.
+
 ## Learned denoising and quantification
 
 Neural networks trained on paired data now denoise ASL difference images, predict the CBF
@@ -521,17 +742,29 @@ That is the loop the book has closed with aslscan and the ASLDRO phantom
 {cite:p}`olivertaylor2021`: the toy tier for every curve, the pipeline tier for every image.
 
 The limits of the simulator are the limits of the validation, and the chapters have said
-where they apply. The table lists what aslscan does not model, which chapter of this book
-would change if it did, and what adding it would take.
+where they apply. Several of the methods of this chapter are in the simulator, each with
+an approximation of its own: the macrovascular compartment, modeled as
+plug flow with one arterial blood volume and one arterial arrival per tissue, without
+dispersion and without vessel geometry (the `vascular` runs above); water exchange, modeled
+as a single-pass split of the label's $T_2$, not as a two-compartment $T_1$ model (the
+`multi-te` runs); physiological noise, modeled as global factors per slice or shot, without
+spatial structure or a pulsatile arterial volume (the `physio` runs of
+[Chapter 9](../03-preprocessing/09-background-suppression.md)); the 3D readouts, with an
+ideal slab ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)); and spatially
+selective suppression pulses, through the bolus-position model
+([Chapter 9](../03-preprocessing/09-background-suppression.md)). The table lists what
+aslscan still does not model, which chapter of this book would change if it did, and what
+adding it would take.
 
 | Not modeled | Where it matters | What adding it takes |
 |---|---|---|
-| Macrovascular compartment | Chapters 15, 18, 19: short-delay samples, time-encoded fits | An arterial blood volume map and an arterial arrival map in the phantom; one more term in the signal stage, the arterial concentration times $2\alpha M_{0\mathrm{b}}\,a\mathrm{BV}$, with its own $T_2$; a `VascularCrushing` flag that removes it |
-| Bolus dispersion | Chapters 15, 18: multi-delay fits | A kernel (gamma-variate with two parameters, possibly maps) convolved with the delivery in `kinetic.delta_m`, which then becomes a numerical integral as in this chapter |
-| Water exchange | Chapter 16, this chapter: TE dependence, calibration | A two-compartment kinetic model with an exchange-time map, and the transverse decay applied per compartment at the echo time instead of blood $T_2$ for all of the label |
-| Physiological noise | Chapters 8, 9, 10: why background suppression matters, tSNR | Multiplicative fluctuations of the static signal per volume (cardiac and respiratory components, a slow drift) and a pulsatile term on the arterial signal, scaled with the static signal so that suppression reduces them |
-| 3D readouts | Chapters 6, 7, 9, 17: slice timing, suppression timing, SNR | A slab excitation, a $k_z$ echo train with its $T_2$ window per compartment, segmentation across excitations with motion between them; no slice offsets |
-| Spatially selective suppression pulses | Chapter 9: the label's own suppression factor | Tracking where the label is at each pulse (still in the arteries below the imaging region, or in it) instead of the global-bolus factor $\prod(1 - 2\epsilon)$ |
+| Bolus dispersion | Chapters 15, 18 and this one: multi-delay and time-encoded fits, the abrupt arterial cut-off of the `vascular` runs | A kernel (gamma-variate with two parameters, possibly maps) convolved with the delivery in `kinetic.delta_m` and with the arterial compartment, which then become numerical integrals as in this chapter |
+| A two-compartment $T_1$ exchange model | Chapter 5 and this chapter: the total label, not only its $T_2$ split | Separate longitudinal decay for the intravascular label ($T_{1\mathrm{b}}$) and the exchanged label ($T_1'$), which the single-pass model keeps at $T_1'$ for both; the `deltam` truth would then leave the Buxton curve |
+| Slab profile and $k_z$ aliasing | Chapters 2 and 17: the end partitions of a 3D volume, the choice of slab oversampling | An excitation profile along z and a field of view that can be smaller than the excited object, so that the edges wrap, with the through-plane oversampling that real 3D ASL uses against it |
+| 3D gradient-echo trains | This chapter and Chapter 18: multi-echo and Look-Locker acquisitions with a 3D readout | An echo train whose amplitudes follow $T_2^*$ and the field map's phase per echo instead of the extended phase graph's spin echoes |
+| The echo train's longitudinal state | Chapters 2, 9, 10: the steady state of a segmented 3D readout, suppression timing across shots | Carrying what the train leaves of $M_z$ into the next repetition instead of counting recovery from zero at the excitation |
+| Labeling-plane motion | Chapters 4, 10: labeling efficiency under head motion | Moving the labeling plane with the head, so the efficiency and the arterial path change per volume, instead of moving only the finished images |
+| Look-Locker with 3D or multi-echo readouts | Chapter 18 | The depletion model of Chapter 18 applied through a 3D train's excitations, and several echoes of each Look-Locker readout |
 | Velocity-selective and vessel-encoded labeling | This chapter | A labeling stage that acts on a velocity or on a position in the labeling plane rather than on a global efficiency; vessel encoding needs an arterial territory map in the phantom |
 
 Each row is a direction in which the simulator can grow, and each extension makes one more
@@ -545,13 +778,22 @@ phantom with spatially varying maps, which every function in `aslbook` already a
 - **Long or unknown transit times** are the case for velocity-selective labeling; its
   price is efficiency, not timing.
 - **A territory question** needs vessel encoding, at no cost in the perfusion image.
-- **A short echo time** keeps the exchange question out of a single-echo CBF measurement;
-  at 30 ms the blood-$T_2$ calibration can be off by a tenth if most of the label has
-  exchanged, and only a multi-echo acquisition can tell.
-- **A segmented 3D readout with background suppression** is the recommended readout; know
-  its echo train length, which sets the through-plane blur.
-- **Short delays contain arterial signal.** Crush it, avoid it, or model it; do not fit the
-  standard model to samples before the bolus has cleared the arteries.
+- **A short echo time** keeps the exchange question out of a single-echo CBF measurement.
+  At the reference delay 2.5 % of the gray matter label was still in blood, and a
+  calibration that gives the whole label the blood's constant underestimated CBF by 7 % at
+  12 ms and 29 % at 54 ms; only a multi-echo acquisition can tell, and it must read at a
+  short delay, where an eighth of the label was still intravascular at 1.0 s.
+- **A segmented 3D readout with background suppression** is the recommended readout;
+  [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) measures its through-plane
+  blur and its noise advantage, and the `vascular` runs show it giving every voxel the
+  same delay.
+- **Short delays contain arterial signal.** With 2 % of a voxel arterial the signal at
+  delays below the arterial arrival was three times the perfusion signal, the standard fit
+  to the seven delays doubled CBF (128.5 against 60.5) and put the arrival at the grid's
+  edge; crushing at VENC 4 cm/s left a fifth of it and restored CBF (60.0) but not the
+  arrival (0.30 s against 0.79); dropping the delays below the arterial arrival restored
+  both. Crush it, avoid it, or model it; do not fit the standard model to samples before the
+  bolus has cleared the arteries.
 - **Ask how a learned method was validated**, and prefer methods scored against a
   simulated truth under the artifacts of your protocol.
 
@@ -560,8 +802,9 @@ phantom with spatially varying maps, which every function in `aslbook` already a
 The reviews of advanced ASL methods {cite:p}`vanosch2018,hernandezgarcia2019`;
 velocity-selective ASL {cite:p}`wong2006` and its inversion variant {cite:p}`qin2016`;
 vessel-encoded {cite:p}`wong2007` and super-selective {cite:p}`helle2010` labeling;
-restricted water exchange {cite:p}`stlawrence2000,zhou2001,parkes2002` and its $T_2$
-signature {cite:p}`gregori2013`; 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
+restricted water exchange {cite:p}`stlawrence2000,zhou2001,parkes2002`, its $T_2$
+signature {cite:p}`gregori2013` and a multi-TE study of blood-brain barrier permeability
+{cite:p}`ohene2021`; 3D GRASE {cite:p}`gunther2005,fernandezseara2005`
 and the comparison of readouts {cite:p}`vidorreta2013`; models of dispersion
 {cite:p}`hrabe2004,chappell2013` and the macrovascular model {cite:p}`chappell2010`;
 deep learning applied to ASL {cite:p}`kim2018`; the multi-timepoint recommendations, which discuss dispersion and

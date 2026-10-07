@@ -31,7 +31,11 @@ for name, (units, definition, chapters) in truth.TRUTH_MAPS.items():
 |---|---|
 | perfusion, att, T1map, T2map, M0map, dseg | `sub-01_desc-<map>_gt.nii.gz` with a JSON sidecar giving the units and the resampling rule |
 | deltam, deltamStatic | `sub-01_desc-deltam_gt.nii.gz` (4-D, one volume per series row), `sub-01_desc-deltamStatic_gt.nii.gz` in motion runs |
-| motion | `sub-01_desc-motion_gt.tsv`: `volume`, `trans_x/y/z` (mm), `rot_x/y/z` (radians), and any within-volume events |
+| motion | `sub-01_desc-motion_gt.tsv`: `volume`, `trans_x/y/z` (mm), `rot_x/y/z` (radians); `sub-01_desc-motionEvents_gt.tsv` for the shot events of a segmented run |
+| deltamIntravascular, deltamArterial, deltamSuppressed, deltamRead | `sub-01_desc-<map>_gt.nii.gz`, 4-D like deltam, written only when the run's exchange time, arterial compartment, bolus-position suppression or Look-Locker readout is on |
+| aBV, aATT | `sub-01_desc-aBV_gt.nii.gz`, `sub-01_desc-aATT_gt.nii.gz`, with an arterial compartment |
+| physio, lookLocker | `sub-01_desc-physio_gt.tsv` (one row per volume and slice or shot), `sub-01_desc-lookLocker_gt.tsv` (one row per readout and excitation group) |
+| raw (encoded) truth | `sourcedata/sub-01/perf/ground-truth/sub-01_desc-deltam_gt.nii.gz` and `sub-01_desc-preparations_gt.tsv` of a Hadamard run, beside the raw series and `sub-01_rawvolumes.tsv` |
 | tissue fractions | `derivatives/aslbook/sub-01/perf/sub-01_label-{GM,WM,CSF}_probseg.nii.gz` |
 
 ## What the deltam truth is, exactly
@@ -45,7 +49,11 @@ measured control-label difference in image units, multiply by the intensity scal
 by $e^{-\mathrm{TE}/T_{2b}}$, and by the label factor from the sidecar
 ([Chapter 5](../02-labeling/05-kinetic-model.md) does this on the noise-free reference). In
 motion runs the map is the truth moved by the same poses as the data, so it disagrees with
-the unmoved `deltamStatic` at every boundary of a moved volume.
+the unmoved `deltamStatic` at every boundary of a moved volume. In a 3D run every partition
+shares the slab's excitation time, so the slice offset is zero. In a time-encoded run the
+main dataset's `deltam` is the ideal signal of each decoded sub-bolus at its own timing,
+and the encoded truth of every raw volume is kept under `sourcedata`. In a Look-Locker run
+`deltam` is the undepleted curve at each readout and `deltamRead` what the readout saw.
 
 ## The transit-time map at boundaries
 

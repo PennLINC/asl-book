@@ -12,6 +12,8 @@ kernelspec:
 - **`voxel-sweep`**: the reference protocol at 2.5, 3.5, and 5 mm in-plane voxels with the noise scaled inversely with the voxel volume (σ 78, 40, 20), 15 pairs ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-voxel-sweep)).
 - **`te-sweep`**: the reference protocol at echo times of 12, 30, and 60 ms, 15 pairs ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-te-sweep)).
 - **`noise-sweep`**: the reference protocol at noise σ of 10, 40, and 80 image units, 30 pairs ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-noise-sweep)).
+- **`ref-pcasl`**: the reference 2D EPI protocol, 30 pairs, as the 2D side of the readout comparison ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
+- **`readout-3d`**: the reference labeling and timing read with a 3D GRASE echo train in one shot (`grase-1shot`) and in four shots (`grase-4shot`), and with a 3D stack of spirals in eight interleaves (`spiral`), 15 pairs each ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout-3d)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 :::
@@ -400,10 +402,10 @@ needs it.
 
 ## 2D or 3D readout
 
-The simulator, and every pipeline dataset in this book, is a 2D multi-slice EPI: one slice
-is excited and read at a time, 40 ms apart, so the 20th slice is read 0.76 s after the
-first. In the kinetic model that is a different post-labeling delay for every slice, and the
-figure shows what it does to the difference signal down the slab at the reference timing.
+The reference protocol, and most pipeline datasets in this book, is a 2D multi-slice EPI:
+one slice is excited and read at a time, 40 ms apart, so the 20th slice is read 0.76 s after
+the first. In the kinetic model that is a different post-labeling delay for every slice, and
+the figure shows what it does to the difference signal down the slab at the reference timing.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -426,18 +428,172 @@ That is not an error as long as the quantification uses each slice's own delay
 across the brain, and it means background suppression, which nulls the tissue at one moment,
 cannot be optimal for every slice ([Chapter 9](../03-preprocessing/09-background-suppression.md)).
 
-A 3D readout excites the whole slab and reads it in one shot or a few segments, so every
-voxel shares one delay, the SNR is higher (the whole volume contributes to each readout),
-and background suppression can null the tissue for the entire volume at once. The white
-paper recommends segmented 3D readouts for these reasons, either 3D GRASE
-{cite:p}`gunther2005,fernandezseara2005` or a 3D stack of spirals {cite:p}`alsop2015`; in a
-direct comparison of single-shot readouts the 3D ones had about twice the spatial SNR of
-2D EPI, and background suppression tripled their temporal SNR {cite:p}`vidorreta2013`.
-The costs are blurring along the slice direction, because
-the long echo train decays with $T_2$ across the k-space partitions, and a longer TR when
-the readout is segmented. The simulator does not model 3D readouts, so this book's images
-are 2D throughout; where a result depends on the choice (slice timing, background suppression
-efficiency), the chapter says so.
+A 3D readout excites the whole slab at once and reads every partition of it after that one
+excitation, so every voxel shares one delay. The `readout-3d` dataset holds the reference
+labeling and timing read two ways. In 3D GRASE, a 90° excitation at 3.6 s is followed by a
+train of 20 refocusing pulses, and each echo reads one $k_z$ partition with an EPI block; in
+one shot every echo reads all 68 phase-encode lines (22.5 ms between echoes), in four shots
+each echo reads 17 lines (10 ms between echoes) and the four interleaved shots, one per TR,
+make up a volume. In the stack of spirals each echo reads a partition with one 5 ms spiral
+interleaf, and eight interleaves, one per TR, make up a volume. Both trains are centric: the
+$k_z = 0$ partition, which sets the signal level, is read at the first echo, so TE is the
+first echo's time (10 ms for the 4-shot GRASE, 12 ms for the spiral, 22 ms for the single
+shot). The simulator records the shots per volume as the sidecar's `NumberShots` and the
+time a volume takes as `AslscanSimulation.Readout.VolumeDuration`.
+
+## Measure it: the 3D readouts on the phantom
+
+The figure repeats the per-slice measurement on the pipeline: the gray matter difference
+signal of each slice, from the mean of the pairs, for the 2D reference and the three 3D
+runs, with the kinetic model's expectation dashed in the same color (the model's $\Delta M$
+at each slice's own delay, times 100 and the blood's $T_2$ decay to that run's TE). For a 3D
+sidecar `protocols.slice_offsets` returns a single zero, so the model's curve is flat. The
+printed ratios compare the measured values with the model and, for the 3D runs, with the
+kinetic truth blurred along $z$ by the echo train's $T_2$ window, which the sidecar
+records as `EchoAmplitudes.KzModulation` ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)).
+
+```{code-cell} python
+:tags: [hide-input]
+r3d = data.load_dataset("readout-3d")
+readouts = {"2D EPI (reference)": data.load_dataset("ref-pcasl").run(), "3D GRASE, 1 shot": r3d.run("grase-1shot"),
+            "3D GRASE, 4 shots": r3d.run("grase-4shot"), "3D stack of spirals, 8 interleaves": r3d.run("spiral")}
+slice_mean = lambda vol, roi: np.array([vol[:, :, z][roi[:, :, z]].mean() for z in range(vol.shape[2])])
+acc = {}
+fig, ax = plt.subplots(figsize=(7.5, 3.4))
+for (name, run), color in zip(readouts.items(), (INK["primary"], PALETTE[2], PALETTE[0], PALETTE[1])):
+    p, ctx = run.sidecar(), run.context()
+    d = quant.subtract(run.mag(), ctx)
+    fr = run.fractions()
+    gm_roi, wm_roi = fr["gm"] > 0.9, fr["wm"] > 0.99
+    t2b = np.exp(-p["EchoTime"] / presets.T2_BLOOD)
+    t = REF.post_labeling_delay + TAU + np.asarray(protocols.slice_offsets(p))          # [0.0] for a 3D sidecar
+    model = np.broadcast_to(kinetic.delta_m(t, GM.perfusion, GM.att, GM.t1, GM.m0) * REF.signal_scale * t2b, (d.shape[2],))
+    meas = slice_mean(d.mean(-1), gm_roi)
+    ax.plot(meas, "o-", color=color, ms=3.5, label=f"{name}, TE {p['EchoTime'] * 1000:.0f} ms")
+    ax.plot(model, ls="--", lw=0.8, color=color)
+    acc[name] = dict(p=p, dm=d.mean(-1)[gm_roi].mean(), sd=d.std(-1, ddof=1)[wm_roi].mean(), pairs=d.shape[-1])
+    note = ""
+    if protocols.is_3d(p):   # the kinetic truth blurred along z by the train's T2 window (Chapter 2)
+        window = np.fft.ifftshift(p["AslscanSimulation"]["EchoAmplitudes"]["KzModulation"]["blood"])
+        gt = run.truth("deltam")[..., ctx.index("label")] * REF.signal_scale
+        blurred = slice_mean(np.real(np.fft.ifft(np.fft.fft(gt, axis=2) * window, axis=2)), gm_roi)
+        note = f"; echo spacing {p['AslscanSimulation']['Readout']['EchoSpacingMs']:.1f} ms; measured / blurred truth {np.mean(meas / blurred):.3f}"
+    print(f"{name}: GM ΔM in slices 0, 9, 19: {meas[0]:.1f}, {meas[9]:.1f}, {meas[19]:.1f}; top / bottom {meas[-1] / meas[0]:.2f} "
+          f"(model {model[-1] / model[0]:.2f}); measured / model {np.mean(meas / model):.2f}{note}")
+ax.set(xlabel="slice (2D, acquired 40 ms apart) or partition (3D)", ylabel="GM control − label (image units)", ylim=(0, 42),
+       xticks=range(0, 20, 2), title="measured per slice (points) against the kinetic model (dashed)")
+ax.legend(fontsize=8, loc="lower left", ncol=2)
+fig.tight_layout()
+```
+
+The 2D points fall on the model's descending curve: 36.7 image units in the first slice,
+19.3 in the last, a top-to-bottom ratio of 0.53 against the model's 0.56, and a mean of
+1.01 times the model over the slab. Every 3D run is flat: the 4-shot GRASE reads 34.2 in
+the middle partition and 32.3 in the last, the spiral 33.1 and 31.8, and their top-to-bottom
+ratios are 1.05 and 1.07 instead of 0.53, because every partition was excited at the same
+3.6 s. Two things keep the 3D values below the model. The first partition dips (30.9 for
+the 4-shot GRASE against 34.2 in the middle) because the slab's end partitions have
+neighbors with no gray matter signal to mix with. More generally the whole 3D curve sits
+at 0.90 (4-shot GRASE), 0.88 (spiral), and 0.82 (single shot) of the model, even though
+the model already includes the first echo's $T_2$ decay to TE: the later echoes of the
+train, which encode the outer $k_z$ partitions, are weaker, and that $T_2$ window across
+$k_z$ is a through-plane point-spread function that spreads the thin cortex into its
+neighbors. The kinetic truth blurred with the sidecar's window reproduces the measured
+curves to 1.7 %, 1.2 %, and 1.3 %, so the deficit is this blur and nothing else; it is
+largest for the single shot, whose 22.5 ms echo spacing (against 10 ms for four shots and
+12 ms for the spiral) lets the window decay fastest.
+[Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) measures the point-spread
+function itself.
+
+The second half of the 3D argument is the noise. In a 2D acquisition each slice's image is
+reconstructed from its own readout, so its noise is the noise of one 2D readout; in a 3D
+acquisition every partition's image is a Fourier combination of all 20 partitions' readouts,
+and for a Cartesian reconstruction the image noise falls by $\sqrt{20}$ at the same noise
+per sample (the simulator states this for GRASE, and measures rather than asserts it for the
+spiral). That is the SNR gain per volume. But a segmented volume takes `NumberShots`
+repetition times, so the fair comparison is the SNR per unit scan time, the SNR of one pair
+divided by the square root of the time a pair takes. The cell computes both from the
+sidecars, with the per-pair noise measured as the temporal SD of the difference in pure
+white matter (fraction above 0.99; pure gray matter gives the same).
+
+```{code-cell} python
+:tags: [hide-input]
+ref2d = acc["2D EPI (reference)"]
+sigma = np.sqrt(ref2d["p"]["AslscanSimulation"]["Acquisition"]["NoiseVariance"])
+rows = []
+for name, a in acc.items():
+    p = a["p"]
+    ro = p["AslscanSimulation"].get("Readout", {})
+    shots, t_vol = p.get("NumberShots", 1), ro.get("VolumeDuration", p["RepetitionTimePreparation"])
+    snr = a["dm"] / a["sd"]
+    rows.append((name, shots, t_vol, a["dm"], a["sd"], snr, snr / np.sqrt(t_vol)))
+snr_2d, eff_2d = rows[0][5], rows[0][6]
+for name, shots, t_vol, dm, sd, snr, eff in rows:
+    against = f"√2 σ = {np.sqrt(2) * sigma:.1f}" if shots == 1 and not protocols.is_3d(acc[name]["p"]) else f"2D's SD / this {ref2d['sd'] / sd:.2f}, √20 = {np.sqrt(20):.2f}"
+    trt = f"effective readout {1000 * acc[name]['p']['TotalReadoutTime']:.1f} ms; " if "TotalReadoutTime" in acc[name]["p"] else ""
+    print(f"{name}: {shots} shot(s), {t_vol:4.1f} s per volume, {acc[name]['pairs']} pairs in {2 * acc[name]['pairs'] * t_vol / 60:.2f} min; {trt}GM ΔM {dm:.1f}, "
+          f"per-pair SD {sd:.1f} ({against}); SNR per pair {snr:.2f} ({snr / snr_2d:.1f} x 2D), per √s of scan time {eff:.3f} ({eff / eff_2d:.1f} x 2D; √(20 / shots) = {np.sqrt(20 / shots):.2f})")
+traj = acc["3D stack of spirals, 8 interleaves"]["p"]["AslscanSimulation"]["Readout"]["Trajectory"]
+n_spiral, n_cart = 8 * traj["SamplesPerInterleaf"], 68 * 68
+print(f"spiral: {n_spiral} samples per partition against the Cartesian grid's {n_cart} (√ratio {np.sqrt(n_cart / n_spiral):.2f}); "
+      f"measured SD spiral / 4-shot GRASE {rows[3][4] / rows[2][4]:.2f}")
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.0))
+names = [r[0].replace(", ", "\n") for r in rows]
+colors = (INK["primary"], PALETTE[2], PALETTE[0], PALETTE[1])
+axes[0].bar(names, [r[5] for r in rows], color=colors)
+axes[0].set(ylabel="SNR of one pair (GM)", title="per volume: the 3D readouts win by √20")
+axes[1].bar(names, [r[6] for r in rows], color=colors)
+axes[1].set(ylabel="SNR per √s of scan time", title="per unit time: by √(20 / shots)")
+for ax in axes:
+    ax.tick_params(axis="x", labelsize=7); ax.set_axisbelow(True)
+fig.tight_layout()
+```
+
+Per volume the 3D readouts are far ahead: the per-pair noise is 56.2 image units for the
+2D reference ($\sqrt{2}\sigma$) and 12.5 for both GRASE runs, a ratio of 4.51 against the
+$\sqrt{20}$ = 4.47 the simulator asserts, and the per-pair SNR goes from 0.54 to 2.29 (single
+shot, whose longer TE and heavier blur cost it signal) and 2.70 (four shots, 5.0 times the
+2D value). The spiral's noise is lower still, 6.8, an SD ratio of 0.54 to the 4-shot GRASE,
+and its per-pair SNR 4.82 is 9.0 times the 2D value. Part of that is sampling: its eight
+interleaves put 10000 samples on each partition against the 4624 lines of the Cartesian
+grid, which alone would give an SD ratio of 0.68; the rest is in the density-weighted
+least-squares reconstruction, whose noise the simulator measures rather than asserts, and
+which [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) takes apart. Per unit
+scan time the picture changes. A 4-shot volume takes 18.0 s and an 8-interleaf volume
+36.0 s against the 2D volume's 4.5 s, so the 15 pairs of the 4-shot GRASE took 9 min and
+the spiral's 18 min, twice and four times the 2D reference's 4.5 min for 30 pairs. The
+SNR per $\sqrt{\mathrm{s}}$ is 0.253 for 2D, 0.637 for the 4-shot GRASE (2.5 times, where
+$\sqrt{20/4}$ = 2.24 times the noise and 1.12 times the signal, since every partition reads
+at the nominal delay rather than the slab's average, predict 2.50), 0.803 for the spiral
+(3.2 times), and 1.08 for the single shot (4.3 times, the whole $\sqrt{20}$, but with the
+heaviest blur and the longest TE, which is why the white paper's recommendation below is
+a segmented readout). The
+$\sqrt{20}$ per volume becomes $\sqrt{20/\mathrm{NumberShots}}$ per unit time, and the rest
+of the per-time gain is the spiral's sampling. The noise here is thermal only; on a scanner
+the 3D readout's real advantages are the ones the time accounting does not show: one delay
+for the whole slab, compatibility with background suppression, which can null the tissue
+for the entire volume at the one excitation
+([Chapter 9](../03-preprocessing/09-background-suppression.md)), and a shorter effective
+readout per partition, 5.0 ms for the 4-shot GRASE against the 2D reference's 20.0 ms
+(the printed `TotalReadoutTime`), which shrinks the susceptibility distortion
+([Chapter 11](../03-preprocessing/11-susceptibility-distortion.md)). Its costs are the
+through-plane blur ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)) and the
+fact that a volume is assembled from shots acquired seconds apart, so motion or a
+physiological change between shots corrupts the whole volume rather than one slice
+([Chapter 10](../03-preprocessing/10-motion.md),
+[Chapter 13](../03-preprocessing/13-assembled-pipeline.md)).
+
+The white paper recommends segmented 3D readouts for these reasons, either 3D GRASE
+{cite:p}`gunther2005,fernandezseara2005` or a 3D stack of spirals with background
+suppression {cite:p}`ye2000,alsop2015`. In a direct comparison of single-shot readouts on
+volunteers, the 3D ones had about twice the spatial SNR of 2D EPI, and background
+suppression tripled their temporal SNR {cite:p}`vidorreta2013`; that is the field's number.
+The phantom's number for the same comparison is the per-pair SNR ratio above, 4.3 for the
+single-shot GRASE against 2D EPI at the same noise per sample. It is larger than the
+field's because the simulated noise is thermal only and the slab is an ideal one (exactly
+the field of view, uniform coil sensitivities, no through-plane oversampling, as the
+sidecar's `Readout.Approximations` list says), where a scanner's 3D readout pays for slab
+profile, oversampling, and physiological noise that no averaging removes.
 
 ## Background suppression, the M0 scan, and field strength
 
@@ -492,7 +648,7 @@ the labeling-duration limits above.
 
 ## Worked example: a five-minute protocol for an older population
 
-A study of adults over 70 at 3 T, with a 2D EPI readout as the simulator models it, wants
+A study of adults over 70 at 3 T, with the reference protocol's 2D EPI readout, wants
 CBF maps in five minutes of scanning. The choices, in the order they constrain each other:
 
 ```{code-cell} python
@@ -534,14 +690,16 @@ fig.tight_layout()
 | Pairs | 30 | what fits in 5 min after the M0 scan | SNR about 3 in gray matter at σ 40 (2 to 3.4 across the slab) | [Chapter 8](../03-preprocessing/08-noise.md) |
 | Voxel | 3.5 × 3.5 × 5 mm | the white paper's range; SNR over resolution | cortex and ventricle walls are mixtures | [Chapter 12](../03-preprocessing/12-partial-volume.md) |
 | TE | 12 ms, spin-echo EPI | shortest the readout allows; 7 % of the label lost | none | [Chapter 16](../04-quantification/16-calibration.md) |
-| Readout | 2D EPI, 20 slices, 40 ms apart | what the simulator models; 3D GRASE preferred on a scanner | per-slice delay; top slice at 56 % of the bottom's signal | [Chapter 14](../04-quantification/14-cbf-quantification.md) |
+| Readout | 2D EPI, 20 slices, 40 ms apart | the readout the arithmetic above assumes; on a scanner 3D GRASE in four shots is preferred: one delay for the slab, 2.5 times the SNR per unit time here, and suppression that nulls the whole volume | per-slice delay; top slice at 56 % of the bottom's signal. A 4-shot GRASE would trade that for through-plane blur (0.90 of the model's signal) and a volume that motion between shots corrupts | this chapter; [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md), [Chapter 10](../03-preprocessing/10-motion.md), [Chapter 14](../04-quantification/14-cbf-quantification.md) |
 | Background suppression | on, two pulses | the white paper's recommendation; suppresses motion and physiological noise | the series cannot calibrate itself | [Chapter 9](../03-preprocessing/09-background-suppression.md) |
 | M0 scan | separate, TR 8 s, same readout | required for absolute CBF | 16 s | [Chapter 16](../04-quantification/16-calibration.md) |
 
 The protocol takes 298 s, just under the five minutes, and the expected gray matter SNR
 after 30 pairs is about 3.4 in the first slice and 1.9 in the last; that is enough for a
-regional CBF map at this voxel size, not for a voxelwise one, which is why a study wanting the latter would add
-background suppression and a 3D readout rather than more pairs.
+regional CBF map at this voxel size, not for a voxelwise one, which is why a study wanting
+the latter would add background suppression and a 3D readout rather than more pairs: on
+this phantom the 4-shot GRASE gave 2.5 times the 2D SNR per unit scan time at the same
+noise, before any suppression, and 30 more pairs would give $\sqrt{2}$.
 
 ## What this implies for acquisition
 
@@ -554,15 +712,21 @@ background suppression and a 3D readout rather than more pairs.
 - **Spend TR on labeling rather than on margin.** Longer labeling raises the signal even
   after paying for the longer TR; TR beyond the readout's need buys nothing.
 - **Keep TE short and record it**, and keep the same TE and readout for the M0 scan.
-- **Prefer larger voxels, 3D readouts, and background suppression to more pairs**: the
-  first three raise the SNR per pair, the last only its square root.
+- **Prefer larger voxels, a 3D readout, and background suppression to more pairs**: the
+  first three raise the SNR per pair, the last only its square root. Count a segmented 3D
+  readout's shots against its time, though: its $\sqrt{20}$ per volume is
+  $\sqrt{20/\mathrm{shots}}$ per unit scan time (2.5 times the 2D value for four shots on
+  this phantom), and what it buys beyond that is one delay for the slab, suppression that
+  nulls the whole volume, and a shorter effective readout, at the price of through-plane
+  blur and sensitivity to anything that changes between shots.
 - **Always acquire the M0 scan.** It costs seconds and without it CBF is not absolute.
 
 ## Further reading
 
 The white paper's protocol recommendations {cite:p}`alsop2015` and their update for
 multi-timepoint acquisitions {cite:p}`woods2024`; the readout comparison of
-{cite:t}`vidorreta2013`; 3D GRASE for ASL {cite:p}`gunther2005,fernandezseara2005`;
+{cite:t}`vidorreta2013`; 3D GRASE for ASL {cite:p}`gunther2005,fernandezseara2005` and
+the 3D stack of spirals with background suppression {cite:p}`ye2000`;
 background suppression {cite:p}`dixon1991,ye2000` and what its pulses cost the label
 {cite:p}`garcia2005`; the
 blood $T_1$ at 3 T {cite:p}`lu2004` and its $T_2$ {cite:p}`zhao2007`; tissue relaxation

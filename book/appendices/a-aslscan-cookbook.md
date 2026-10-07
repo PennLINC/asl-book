@@ -30,11 +30,13 @@ a separate M0 scan when `M0Type` is `Separate`, and the ground truth on the acqu
 grid. The kinetics stage evaluates the general kinetic model {cite:p}`buxton1998` per phantom
 voxel at each slice's readout time; the signal stage forms the tissue and labeled-blood
 compartments (saturation recovery or the background-suppression timeline for tissue; the
-signed difference for blood); the acquisition stage, shared with the diffusion simulator
-TRXScan through the `mrsim-acq` library, acquires each slice as a 2D single-shot spin-echo
-EPI with T2 and T2' decay, field-map distortion, partial Fourier, ghosts, spikes, receive
-coils, GRAPPA {cite:p}`griswold2002`, k-space noise, and head motion. It reproduces ASLDRO's kinetic and signal
-models {cite:p}`olivertaylor2021`.
+signed difference for blood; optionally the label split by exchange, an arterial
+compartment, and physiological factors); the acquisition stage, shared with the diffusion
+simulator TRXScan through the `mrsim-acq` library, acquires each slice as a 2D single-shot
+EPI, or the whole slab as a segmented 3D GRASE or stack-of-spirals echo train, with T2 and
+T2' decay, field-map distortion, partial Fourier, ghosts, spikes, receive coils, GRAPPA
+{cite:p}`griswold2002`, k-space noise, and head motion, and decodes a time-encoded series.
+It reproduces ASLDRO's kinetic and signal models {cite:p}`olivertaylor2021`.
 
 ## Tools and phantoms
 
@@ -114,10 +116,12 @@ def diff_of(run):
     walk(run.overlay, REF.overlay)
     if run.phantom != REF.phantom:
         out.append(f"phantom = {run.phantom}")
-    kinds = {k: run.ctx.count(k) for k in ("m0scan", "control", "label") if k in run.ctx}
-    ref_kinds = {k: REF.ctx.count(k) for k in ("m0scan", "control", "label") if k in REF.ctx}
+    kinds = {k: run.ctx.count(k) for k in ("m0scan", "control", "label", "deltam") if k in run.ctx}
+    ref_kinds = {k: REF.ctx.count(k) for k in ("m0scan", "control", "label", "deltam") if k in REF.ctx}
     if kinds != ref_kinds:
         out.append("aslcontext: " + ", ".join(f"{n} {k}" for k, n in kinds.items()))
+    if run.echo_times:
+        out.append(f"one sidecar per echo: {', '.join(f'{1e3 * te:g} ms' for te in run.echo_times)}")
     return out
 
 def describe(ds):
@@ -253,6 +257,102 @@ describe("readout")
 describe("kitchen-sink")
 ```
 
+(ds-readout-3d)=
+### readout-3d
+
+```{code-cell} python
+:tags: [hide-input]
+describe("readout-3d")
+```
+
+A 3D sidecar has no `SliceTiming` and no `TotalReadoutTime` (the simulator writes the
+effective spacing it resolved); `FlipAngle` is the echo train's refocusing angle, and the
+in-plane segmentation, the actual EPI line spacing, and the spiral's interleaves, readout
+time and dwell time, none of which BIDS records, come from the overlay's `[readout]` table.
+Every resolved value of the train (echo spacing, echo train length, lines per echo, the
+echo amplitudes of every tissue and the resulting k-space modulation) is in
+`AslscanSimulation.Readout` and `AslscanSimulation.EchoAmplitudes`
+([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). A volume of a four-shot
+readout takes four repetition times, which the NIfTI time step records.
+
+(ds-physio)=
+### physio
+
+```{code-cell} python
+:tags: [hide-input]
+describe("physio")
+```
+
+The factors the simulator applied to every volume and slice, with the true cardiac and
+respiratory phases and the drift, are in `sub-01_desc-physio_gt.tsv`
+([Chapter 9](../03-preprocessing/09-background-suppression.md)).
+
+(ds-hadamard)=
+### hadamard
+
+```{code-cell} python
+:tags: [hide-input]
+describe("hadamard")
+```
+
+The sidecar's arrays describe the *decoded* volumes, as the BIDS convention for
+time-encoded data has it: each `deltam` row's `LabelingDuration` is its sub-bolus and its
+`PostLabelingDelay` the time from the end of that sub-bolus to the readout. The simulator
+acquires the encoded volumes, keeps them under `sourcedata/` with a table of which sub-boli
+each one labeled, and writes the decoded series as the main dataset
+([Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md)); the files of a run:
+
+```{code-cell} python
+:tags: [hide-input]
+cookbook.print_tree(cfg, "hadamard")
+```
+
+(ds-look-locker)=
+### look-locker
+
+```{code-cell} python
+:tags: [hide-input]
+describe("look-locker")
+```
+
+Each labeling is followed by eight readouts, one volume each, so the `PostLabelingDelay`
+array runs through the eight inversion times once per cycle and `FlipAngle` is the
+readouts' excitation. Beside the undepleted `deltam` truth the simulator writes
+`desc-deltamRead_gt`, what each readout actually read after the earlier readouts of the
+cycle consumed part of the label, and `desc-lookLocker_gt.tsv`, the tissue magnetization
+before every readout ([Chapter 18](../05-advanced/18-time-encoded-and-look-locker.md)).
+
+(ds-multi-te)=
+### multi-te
+
+```{code-cell} python
+:tags: [hide-input]
+describe("multi-te")
+```
+
+A multi-echo run reads one sidecar per echo (repeated `--asl-json`, identical except for
+`EchoTime`) and writes one series per echo in the BIDS `echo-N` layout, with one
+`aslcontext.tsv` and one ground truth shared by all echoes:
+
+```{code-cell} python
+:tags: [hide-input]
+cookbook.print_tree(cfg, "multi-te")
+```
+
+(ds-vascular)=
+### vascular
+
+```{code-cell} python
+:tags: [hide-input]
+describe("vascular")
+```
+
+The arterial compartment's inputs are per tissue (the phantom carries no arterial maps), and
+the simulator writes them back as maps (`desc-aBV_gt`, `desc-aATT_gt`) beside the arterial
+signal of every volume before crushing (`desc-deltamArterial_gt`), so that the crushed and
+uncrushed series can be scored against it
+([Chapter 19](../05-advanced/19-frontiers.md)).
+
 ## Regenerating a dataset
 
 Every dataset directory carries a `provenance.json` with the exact command lines, the
@@ -264,4 +364,6 @@ micromamba run -n aslbook snakemake -c 4 <dataset-id>
 ```
 
 The Snakefile (the pipeline is a Snakemake workflow {cite:p}`molder2021`) prepares the phantom slabs, runs the commands above, adds the tissue
-fractions, and writes the provenance file. A run takes about eight seconds on the slab.
+fractions, and writes the provenance file. A 2D run takes about eight seconds on the slab
+and a 3D GRASE run about as long; a stack-of-spirals run takes minutes, because the
+non-Cartesian reconstruction is iterative.

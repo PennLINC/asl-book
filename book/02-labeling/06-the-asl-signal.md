@@ -200,7 +200,8 @@ The measured points sit on the model line, and the last slice's difference is mo
 40 % lower than the first's. A quantification that uses one delay for every slice would
 underestimate perfusion in the upper slices by that much; [Chapter 14](../04-quantification/14-cbf-quantification.md)
 corrects it slice by slice. A 3D readout acquires the whole volume at one delay and has no
-such gradient ([Chapter 7](./07-acquisition-parameters.md)).
+such gradient; [Chapter 7](./07-acquisition-parameters.md) measures the same slab read
+with a 3D GRASE and shows the gradient gone.
 
 ## The M0 scan
 

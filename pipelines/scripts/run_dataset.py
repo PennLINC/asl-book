@@ -54,6 +54,17 @@ def git_head(repo: str) -> str:
         return "unknown"
 
 
+def source_changed(repo: str, pin: str) -> bool | None:
+    """Whether the Rust sources differ between the pinned commit and HEAD (``None`` if git
+    cannot tell): commits that touch only documentation leave the binary's code identical."""
+    try:
+        out = subprocess.run(["git", "-C", repo, "diff", "--stat", f"{pin}..HEAD", "--", "src", "Cargo.toml", "Cargo.lock"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+    return bool(out)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="config/datasets.yaml")
@@ -70,7 +81,10 @@ def main():
     for repo, key in ((tools["aslscan_repo"], "aslscan_commit"), (tools["mrsim_acq_repo"], "mrsim_acq_commit")):
         head = git_head(repo)
         if head != "unknown" and head != tools[key]:
-            raise SystemExit(f"{repo} is at {head}, the configuration pins {tools[key]}; update the pin or check out the commit")
+            if source_changed(repo, tools[key]) is False:
+                print(f"note: {repo} is at {head}, the configuration pins {tools[key]}; the commits between touch no source, so the pinned binary is current")
+            else:
+                raise SystemExit(f"{repo} is at {head}, the configuration pins {tools[key]}; update the pin or check out the commit")
     version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip()
 
     runs = cookbook.expand(cfg, a.dataset)
@@ -89,8 +103,11 @@ def main():
             if out.exists():
                 shutil.rmtree(out)
             inp = cookbook.write_inputs(run, data_root)
-            cmd = [binary, "--asl-json", str(inp / "asl.json"), "--aslcontext", str(inp / "aslcontext.tsv"),
-                   "--overlay", str(inp / "overlay.toml"), "--phantom", str(phantom_dir), "--out", str(out), "--seed", str(run.seed)]
+            cmd = [binary]
+            for f in run.sidecar_files():
+                cmd += ["--asl-json", str(inp / f)]
+            cmd += ["--aslcontext", str(inp / "aslcontext.tsv"),
+                    "--overlay", str(inp / "overlay.toml"), "--phantom", str(phantom_dir), "--out", str(out), "--seed", str(run.seed)]
             t0 = time.time()
             res = subprocess.run(cmd, capture_output=True, text=True)
             dt = time.time() - t0
@@ -102,6 +119,7 @@ def main():
         prov["runs"].append({
             "name": run.name, "description": run.description, "phantom": run.phantom, "seed": run.seed,
             "command": run.command(cfg), "protocol": run.protocol, "aslcontext": run.ctx, "overlay": run.overlay,
+            **({"echo_times": run.echo_times} if run.echo_times else {}),
         })
     (data_root / a.dataset / "provenance.json").write_text(json.dumps(prov, indent=1) + "\n")
 

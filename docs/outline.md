@@ -1,6 +1,6 @@
 # Arterial spin labeling: an executable book — outline
 
-Status: written 2026-09-30. Companion: [chapter-conventions.md](chapter-conventions.md)
+Status: written 2026-09-30; extended 2026-10-06 for the 3D, time-encoded, Look-Locker, multi-echo, vascular and physiological-noise simulations. Companion: [chapter-conventions.md](chapter-conventions.md)
 (the notebook standard every chapter follows) and the diffusion book this one is modeled on
 (`../diffusion-book`).
 
@@ -8,7 +8,7 @@ Status: written 2026-09-30. Companion: [chapter-conventions.md](chapter-conventi
 
 Every figure in the book is produced by code the reader can run. Realistic data come from
 **aslscan** (a headless ASL simulator: a BIDS ASL protocol + a digital brain phantom → a BIDS
-ASL series with the artifacts of a 2D spin-echo EPI acquisition, plus the ground-truth maps
+ASL series with the artifacts of a 2D EPI, a 3D GRASE or a stack-of-spirals acquisition, plus the ground-truth maps
 the series was made from). Because the phantom is piecewise constant (one perfusion, transit
 time, T1, T2, T2*, M0 per tissue class) the answer key is exact: every quantification chapter
 ends with a quantitative "estimate vs. truth" comparison.
@@ -18,7 +18,7 @@ Two kinds of simulation feed the book, and each chapter says which it uses:
 | Tier | What | Where it runs | Used for |
 |---|---|---|---|
 | **Toy** | the kinetic model and the signal equations evaluated in the page on the packaged phantom slab (`aslbook.synth`: aslscan's signal stage in numpy, no k-space), plus small Bloch / k-space / noise simulations | at book build time, seconds | physics intuition, every curve, anything that needs a parameter sweep too fine for the pipeline |
-| **Pipeline** | aslscan runs on the slab (`pipelines/`): 2D SE-EPI with k-space, oversampling (ringing), noise, coils/GRAPPA, partial Fourier, ghosts, spikes, a field map, background suppression, motion | offline, ~8 s per run; outputs versioned and fetched at build time | realistic images, artifacts, preprocessing walkthroughs, quantification vs. truth |
+| **Pipeline** | aslscan runs on the slab (`pipelines/`): 2D SE-EPI (the reference), 3D GRASE and stack-of-spirals readouts, with k-space, oversampling (ringing), noise, coils/GRAPPA, partial Fourier, ghosts, spikes, a field map, background suppression (global-bolus or bolus-position), motion (per volume or per shot), physiological noise, time encoding, Look-Locker readouts, multi-echo readouts, exchange, an arterial compartment and crushing | offline, ~8 s per 2D or GRASE run, minutes per spiral run; outputs versioned and fetched at build time | realistic images, artifacts, preprocessing walkthroughs, quantification vs. truth |
 
 The toy tier reproduces aslscan's `deltam` ground truth to float32 precision on every voxel
 (verified in `aslbook/tests`), so the two tiers are one simulator with and without its
@@ -60,8 +60,9 @@ Audience, the executable cells, the two tiers, running locally, reproduction, co
 ### 0.2 The simulated datasets
 The phantom (maps, why piecewise constant), what aslscan does (kinetics → signal → acquisition,
 with the simulator diagram), the reference protocol, the dataset table, the ground truth and
-what it is not (global-bolus suppression approximation; no macrovascular compartment, no
-physiological noise, no 3D readouts, single T1 per tissue, no exchange).
+what it is not (one value per tissue, no dispersion, an ideal 3D slab, global
+physiological noise; the arterial compartment, exchange, physiological noise and the
+bolus-position suppression model exist but are off unless a dataset turns them on).
 
 ### 0.3 Notation and units
 
@@ -80,10 +81,17 @@ steady-state signal vs TR per tissue; the blood-tissue T1 comparison. *Pipeline:
 ### Chapter 2 — Spatial encoding, EPI, and reconstruction
 k-space, FOV/matrix/Nyquist, the EPI trajectory and readout time, distortion ∝ field offset ×
 readout time along phase encode, partial Fourier, multi-coil and GRAPPA, magnitude/phase,
-noise from k-space to image (Gaussian → Rician), Gibbs ringing from truncation. Condensed:
-this chapter exists so Part III can refer to it. *Toy:* the packaged 1 mm slice → k-space →
-image at the ASL matrix; truncation ringing; an EPI timing diagram. *Pipeline:* `ref-pcasl`
-(one control image, its phase, the M0 scan, the sidecar's readout metadata).
+noise from k-space to image (Gaussian → Rician), Gibbs ringing from truncation; then the
+3D readouts: a slab excitation and a train of spin echoes reading one k_z partition each
+(GRASE: an EPI block per echo; stack of spirals: an interleaf per echo), the echo amplitudes
+(T2 decay, stimulated echoes below 180°) as a k_z window and the through-plane point-spread
+function, segmentation over shots, the sqrt(n_z) noise advantage, the spiral trajectory and
+its off-resonance blur. Condensed: this chapter exists so Part III can refer to it. *Toy:*
+the packaged 1 mm slice → k-space → image at the ASL matrix; truncation ringing; an EPI
+timing diagram; the k_z window → PSF. *Pipeline:* `ref-pcasl` (one control image, its
+phase, the M0 scan, the sidecar's readout metadata); `readout-3d` (the same control image
+with one-shot and four-shot GRASE at 180° and 130°, and the spiral; the sidecar's echo
+amplitudes against the measured through-plane blur; the noise per volume).
 
 ---
 
@@ -132,10 +140,11 @@ difference measured; the noise σ estimated from the background).
 For each: what it controls, what it costs, a simulated sweep. PLD and LD (SNR vs ATT
 robustness; the white paper's recommendations by population); TR (must hold LD + PLD +
 readout); number of pairs (SNR ∝ √N, scan time); voxel size (SNR ∝ volume, partial
-volume); TE (T2 of blood vs tissue); 2D vs 3D readouts (slice timing, background suppression
-compatibility; 3D not simulated); background suppression (pointer to Ch. 9); M0 scan
-choices (pointer to Ch. 16); field strength (T1b, T1 longer at 3 T). Closing worked example: a
-5-minute protocol. *Pipeline:* `pld-sweep`, `voxel-sweep`, `te-sweep`, `noise-sweep`.
+volume); TE (T2 of blood vs tissue); 2D vs 3D readouts (slice timing against one delay for
+the slab, the SNR per volume and per unit time, the through-plane blur, the volume that
+takes several TRs); background suppression (pointer to Ch. 9); M0 scan choices (pointer to
+Ch. 16); field strength (T1b, T1 longer at 3 T). Closing worked example: a 5-minute
+protocol. *Pipeline:* `pld-sweep`, `voxel-sweep`, `te-sweep`, `noise-sweep`, `readout-3d`.
 
 ---
 
@@ -158,10 +167,14 @@ Why the static signal is the enemy (motion and physiological fluctuations scale 
 ΔM does not); inversion pulses timed to null tissues at readout: the longitudinal timeline
 (`kinetic.tissue_mz`); optimizing two pulse times for GM and WM; the slice dependence in 2D
 (later slices recover); the label's own factor `(1−2ε)^N` and the sign flip with one pulse;
-the cost: M0 cannot come from the suppressed series, and the simulator's global-bolus
-approximation. *Toy:* the timeline figure, the optimization, the slice dependence.
-*Pipeline:* `bgsup` (off / on / perfect / presat): control images, ΔM images, their SNR, and
-`motion` (random vs random-bgsup: motion artifacts with and without suppression).
+the cost: M0 cannot come from the suppressed series; the global-bolus model against the
+bolus-position model (a pulse inverts only the label inside the slab); what suppression buys
+against physiological noise, measured; suppression with a 3D readout, where one null serves
+the slab. *Toy:* the timeline figure, the optimization, the slice dependence.
+*Pipeline:* `bgsup` (off / on / perfect / presat / on-slab / early-slab): control images, ΔM
+images, their SNR, the effective suppression factor; `physio` (off / on: tSNR with
+physiological noise, without and with the pulses); `readout-3d` (the four-shot GRASE and the
+spiral with the pulses); `motion` (random vs random-bgsup).
 
 ### Chapter 10 — Head motion
 Rigid motion between volumes; why ASL is unusually sensitive (a 1 % signal difference vs a
@@ -171,17 +184,23 @@ the simulator's true poses replayed); outlier handling: a simple deviation rule,
 (Dolui 2017: mean-GM-CBF outliers at 2.5 MAD, then removal of the volume most correlated
 with the mean map while the pooled within-tissue variance falls) and SCRUB (Dolui 2016:
 robust voxelwise reweighting with a tissue prior, run on the volumes SCORE kept), each
-implemented in the page and scored against truth; the drift case. *Pipeline:* `motion` (random, drift, random-bgsup),
-ground-truth poses from `desc-motion_gt.tsv`: score the estimated poses and the ΔM/CBF
-error before and after correction and rejection.
+implemented in the page and scored against truth; the drift case; motion between the shots
+of a segmented 3D readout, which ghosts along the segmented axis and which no volume
+registration can undo. *Pipeline:* `motion` (random, drift, random-bgsup), ground-truth
+poses from `desc-motion_gt.tsv`: score the estimated poses and the ΔM/CBF error before and
+after correction and rejection; `readout-3d` (grase-4shot-shotmotion and its
+`desc-motionEvents_gt.tsv`).
 
 ### Chapter 11 — Susceptibility distortion
 Field map → displacement along phase encode ∝ Δf × TotalReadoutTime; pile-up and
 stretching; where it hits ASL (frontal and temporal GM); blip-up/blip-down pairs and the
 fieldmap-based unwarp (a didactic unwarp from the known field: shift each column by the
 field × readout time, intensity-corrected by the Jacobian); a reverse-PE estimate of the
-field. *Pipeline:* `sdc` (ap, pa, undistorted): distortion in the control image and in CBF;
-the unwarped result vs the undistorted reference.
+field; the 3D readouts under the same field map: a segmented GRASE whose effective echo
+spacing is the line spacing over the segment count, so the displacement is a quarter of the
+single-shot one, and the spiral, which blurs instead of displacing. *Pipeline:* `sdc` (ap,
+pa, undistorted): distortion in the control image and in CBF; the unwarped result vs the
+undistorted reference; `readout-3d` (grase-4shot-fieldmap, spiral-fieldmap).
 
 ### Chapter 12 — Partial volume effects
 Voxels of 3.5 × 3.5 × 5 mm mix GM, WM, CSF; CBF in a mixed voxel is the fraction-weighted
@@ -191,8 +210,9 @@ fractions of every voxel from the pipeline. *Pipeline:* `ref-pcasl`, `voxel-swee
 scatter of CBF vs GM fraction, PV-corrected GM CBF vs the true 60 and WM vs 20.
 
 ### Chapter 13 — Remaining artifacts and the assembled pipeline
-Nyquist ghosts, k-space spikes, partial Fourier blurring (`readout` dataset) and how they
-look in ΔM; then the assembled pipeline: motion correction → (distortion correction) →
+Nyquist ghosts, k-space spikes, partial Fourier blurring (`readout` dataset), the
+segmentation ghost of a 3D readout whose shots differ (physiological noise, `readout-3d`),
+and how they look in ΔM; then the assembled pipeline: motion correction → (distortion correction) →
 subtraction with outlier rejection → M0 calibration → CBF → PV correction → QC metrics
 (tSNR, motion, negative CBF fraction, GM/WM ratio); how ASLPrep / BASIL / the ASL white
 paper order these. *Pipeline:* `kitchen-sink` corrected end to end with the book's own
@@ -217,7 +237,8 @@ pointer to Ch. 18). *Pipeline:* `multi-pld` (fit vs truth for CBF and ATT), `pld
 
 ### Chapter 16 — Calibration: M0, λ, T1, α, and the readout
 Where M0 comes from (separate scan, included volumes, the control mean, estimated); the
-M0 scan's TR and its T1 saturation; the T2 mismatch between blood and tissue at TE; the
+M0 scan's TR and its T1 saturation; the T2 mismatch between blood and tissue at TE, and
+what a finite exchange time does to it (pointer to the multi-echo data of Ch. 19); the
 CSF reference method; sensitivity of CBF to λ, T1b, α, and to the assumed tissue T1; the
 sidecar as the record of what was assumed. *Pipeline:* `m0-types`, `te-sweep`,
 `label-types`.
@@ -235,12 +256,24 @@ multi-PLD dataset with 2D readout; a pediatric protocol).
 ### Chapter 18 — Time-encoded (Hadamard) and Look-Locker ASL
 Encoding sub-boli with a Hadamard matrix and decoding the multi-delay signal from one
 series; Look-Locker readouts sampling the curve after one label; both at the toy tier
-(`kinetic.delta_m` for each sub-bolus; the decoding matrix), with the SNR accounting.
+(`kinetic.delta_m` for each sub-bolus; the decoding matrix), with the SNR accounting; then
+at the pipeline tier: the encoded series the simulator acquired (`sourcedata`), its decoding
+in the page against the simulator's, the decoded noise against the prediction, the 2D
+slice-dependence of the sub-bolus delays and the GRASE variant without it, the fit of CBF
+and ATT scored against truth and against the conventional series of the same scan time; the
+Look-Locker series: what each readout read (`deltamRead`) against the undepleted curve, the
+tissue's driven steady state, and the three fits (ignore, T1_LL, exact) on real images.
+*Pipeline:* `hadamard` (epi, grase, conventional), `look-locker`.
 
 ### Chapter 19 — Frontiers
-Velocity-selective and vessel-encoded ASL, multi-TE ASL and water exchange, 3D GRASE and
-stack-of-spirals readouts, dispersion and macrovascular models, deep-learning denoising,
-and simulation as validation (closing the loop the book has used).
+Velocity-selective and vessel-encoded ASL (toy); multi-TE ASL and water exchange, now
+measured on the `multi-te` dataset (the two-compartment decay of ΔM with TE, the exchanged
+fraction fitted against the `deltamIntravascular` truth, the calibration bias of a
+single-echo assumption); the macrovascular signal, measured on the `vascular` dataset
+(uncrushed vs crushed vs none, scored against `deltamArterial`, the standard fit's bias);
+dispersion (toy); a pointer to the 3D readouts of Ch. 2 and what remains unmodeled;
+deep-learning denoising; and simulation as validation, with the table of what aslscan still
+does not model. *Pipeline:* `multi-te`, `vascular`.
 
 ---
 
@@ -262,7 +295,7 @@ and simulation as validation (closing the loop the book has used).
 | `pld-sweep` | pld05 … pld30 | the post-labeling delay (TR 6 s, 15 pairs) | 5, 7, 14, 15 |
 | `multi-pld` | multipld | one series with six delays | 15, 17 |
 | `noise-sweep` | sigma10, sigma40, sigma80, coils8-r2 | the noise level; coils + GRAPPA | 8 |
-| `bgsup` | off, on, perfect, presat | background suppression | 9, 10 |
+| `bgsup` | off, on, perfect, presat, on-slab, early-slab | background suppression, and the two suppression models | 9, 10 |
 | `motion` | random, drift, random-bgsup | head motion | 10 |
 | `sdc` | ap, pa, undistorted | field map + phase-encode polarity | 11, 13 |
 | `voxel-sweep` | vox25, vox35, vox50 | in-plane voxel size | 7, 12 |
@@ -270,3 +303,9 @@ and simulation as validation (closing the loop the book has used).
 | `te-sweep` | te12, te30, te60 | the echo time | 7, 16 |
 | `readout` | pf68, ghost, spikes | readout imperfections | 13 |
 | `kitchen-sink` | ap, pa | everything at once | 13 |
+| `readout-3d` | grase-1shot, grase-4shot, grase-4shot-130, spiral, grase-4shot-bgsup, spiral-bgsup, grase-4shot-fieldmap, spiral-fieldmap, grase-4shot-physio, grase-4shot-shotmotion | the 3D readouts, alone and with suppression, a field map, physiology, shot motion | 2, 7, 9, 10, 11, 13 |
+| `physio` | off, on | physiological noise without and with suppression | 8, 9 |
+| `hadamard` | epi, grase, conventional | time-encoded labeling and its conventional twin | 18 |
+| `look-locker` | pasl-ll | eight readouts after each pulsed label | 18 |
+| `multi-te` | ge-pld10, ge-pld18, se-pld10 | three echoes per excitation, a finite exchange time | 16, 19 |
+| `vascular` | none, uncrushed, crushed | the arterial compartment and vascular crushing | 5, 19 |

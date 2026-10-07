@@ -10,6 +10,7 @@ kernelspec:
 - **Built in this page:** the suppression timeline of the kitchen-sink protocol and the box-averaged field map of the phantom ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`readout`**: partial Fourier 6/8, a 5 % Nyquist ghost, and two k-space spikes per slice, one run each ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout)).
 - **`ref-pcasl`**: the artifact-free reference the `readout` runs are compared with ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-ref-pcasl)).
+- **`readout-3d`**: the four-shot 3D GRASE readout with physiological factors that differ from shot to shot (`grase-4shot-physio`) against the same series without them (`grase-4shot`, same seed) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout-3d)).
 - **`sdc`**: used once, to fix the sign of the field-map displacement against its undistorted run ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-sdc)).
 - **`kitchen-sink`**: everything at once, as a blip-up/blip-down pair with the same head motion ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-kitchen-sink)).
 
@@ -20,12 +21,12 @@ Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-fro
 
 After this chapter you can:
 
-- recognize partial-Fourier blurring, a Nyquist ghost and k-space spikes in a control image and in a difference image, and say what to do about each
+- recognize partial-Fourier blurring, a Nyquist ghost, k-space spikes and the segmentation ghost of a multi-shot 3D readout in a control image and in a difference image, and say what to do about each
 - run the corrections of Chapters [8](./08-noise.md) to [12](./12-partial-volume.md) in order on one series and score each step against the truth
 - explain why registration comes before subtraction, why distortion correction must treat the M0 image the same way as the series, and why partial-volume correction comes last
 - compute the quality-control numbers a pipeline reports (temporal SNR, negative-voxel fraction, GM/WM ratio, motion summary) and read them
 
-The chapter has two parts: three readout imperfections that have no chapter of their
+The chapter has two parts: four readout imperfections that have no chapter of their
 own, and then the preprocessing of Part III assembled into one pipeline and applied step
 by step to the `kitchen-sink` dataset, which has every artifact of the book on at once.
 
@@ -115,7 +116,7 @@ def score_step(name, cbf):
     return cbf
 ```
 
-## Part one: three readout imperfections
+## Part one: four readout imperfections
 
 The EPI readout of [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md) can go wrong in
 ways that no ASL-specific step corrects. The `readout` dataset switches on three of them,
@@ -123,7 +124,9 @@ one per run, in the reference protocol with 15 pairs: `partial_fourier: 0.75` (o
 the phase-encode lines are acquired, the rest filled by conjugate symmetry),
 `ghost_offset: 0.05` (odd and even readout lines disagree, so 5 % of the object reappears
 half a field of view away along the phase-encode axis), and `n_spikes: 2` with
-`spike_amplitude: 4.0` (two k-space samples per slice replaced by a large value).
+`spike_amplitude: 4.0` (two k-space samples per slice replaced by a large value). The
+fourth, the ghost of a segmented 3D readout whose shots disagree, comes from `readout-3d`
+and follows the three.
 
 ```{code-cell} python
 :tags: [hide-input]
@@ -193,6 +196,108 @@ k-space positions, so the difference of two spiked images is two sets of stripes
 mean over 15 pairs is stripes with a per-pair SD in gray matter of 7,600 against 57 in
 the reference. Nothing downstream can repair that; the run is lost unless the spiked
 volumes are few enough to drop.
+
+**The segmentation ghost** belongs to the segmented 3D readouts of
+[Chapter 7](../02-labeling/07-acquisition-parameters.md) rather than to EPI. The
+`grase-4shot` run of `readout-3d` reads each volume in four shots one repetition time
+apart, each shot taking every fourth phase-encode line of every partition, and the image is
+the sum of four interleaved k-space segments. Anything that makes the shots differ, a
+head movement ([Chapter 10](./10-motion.md)) or the heartbeat, breathing and drift that
+scale the tissue signal from one shot to the next ([Chapter 8](./08-noise.md)), weights
+the segments differently, and a weighting that repeats every fourth line of k-space puts
+replicas of the brain at FOV/4, FOV/2, and 3FOV/4 along the phase-encode axis
+{cite:p}`wood1985`. The simulator's own test states the two-segment case: segments
+weighted $w_1$ and $w_2$ give a FOV/2 ghost of $|w_1 - w_2| / (w_1 + w_2)$; with four
+segments the replica amplitudes are the discrete Fourier transform of the four weights,
+so a ghost of a given order is about half the difference between the factors that feed
+it. The `grase-4shot-physio` run applies the physiological factors of the `physio`
+dataset to the four-shot readout; `run.physio()` records the tissue factor of every shot
+of every volume, and `grase-4shot` has the same seed, so the two runs differ by the
+factors alone.
+
+```{code-cell} python
+:tags: [hide-input]
+r3 = data.load_dataset("readout-3d")
+g4, g4p = r3.run("grase-4shot"), r3.run("grase-4shot-physio")
+mag4 = {"grase-4shot": g4.mag().astype(float), "grase-4shot-physio": g4p.mag().astype(float)}
+ctx4, mask4 = g4.context(), g4.mask()
+far4 = ~ndimage.binary_dilation(mask4, iterations=3)
+q4 = mask4.shape[1] // 4                                       # FOV/4 along the phase-encode axis y
+zone4 = (np.roll(mask4, q4, axis=1) | np.roll(mask4, -q4, axis=1)) & far4
+zone2 = np.roll(mask4, 2 * q4, axis=1) & far4
+factors = g4p.physio().pivot(index="volume", columns="shot", values="tissue_factor").values   # (volume, shot)
+amp = np.abs(np.fft.fft(factors, axis=1)) / factors.mean(1, keepdims=True) / factors.shape[1] # replica amplitude per order, relative to the image
+v = 0
+pct = lambda img, z: 100 * img[z].mean() / img[mask4].mean()
+print(f"volume {v} ({ctx4[v]}): tissue factors of its four shots {np.round(factors[v], 4)}, a spread of {100 * (factors[v].max() - factors[v].min()):.1f} %; "
+      f"predicted replicas: FOV/4 {100 * amp[v, 1]:.2f} %, FOV/2 {100 * amp[v, 2]:.2f} % of the image")
+for name, m in mag4.items():
+    print(f"{name:>19}, volume {v}: signal in the FOV/4 zone {pct(m[..., v], zone4):.2f} %, in the FOV/2 zone {pct(m[..., v], zone2):.2f} % of the brain mean")
+change = mag4["grase-4shot-physio"][..., v] - mag4["grase-4shot"][..., v]
+brain_mean = mag4["grase-4shot-physio"][..., v][mask4].mean()
+print(f"physio minus grase-4shot, volume {v}: FOV/4 zone {100 * np.abs(change)[zone4].mean() / brain_mean:.2f} %, FOV/2 zone {100 * np.abs(change)[zone2].mean() / brain_mean:.2f} % of the brain mean; "
+      f"over all 30 volumes the replica amplitudes run from {100 * amp[:, 1:].min():.2f} to {100 * amp[:, 1:].max():.2f} %")
+fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.7))
+for ax, (name, m) in zip(axes, mag4.items()):
+    show_slice(ax, m[..., v], K, f"{name}, volume {v} (0-400)", vmin=0, vmax=400)
+show_slice(axes[2], change, K, "physio − grase-4shot, volume 0", kind="diff", vmin=-150, vmax=150)
+for ax in axes:
+    for z, c in ((zone4, PALETTE[1]), (zone2, PALETTE[2])):
+        ax.contour(plotting.take_slice(z.astype(float), K), levels=[0.5], colors=[c], linewidths=0.6)
+fig.colorbar(axes[2].images[0], ax=axes[2], shrink=0.75, label="image units")
+fig.tight_layout()
+```
+
+The four shots of volume 0 saw tissue factors between 0.966 and 1.009, a spread of 4.4 %,
+and the transform of the four predicts replicas of 0.66 % of the image at FOV/4 and
+1.27 % at FOV/2. In the zones outside the brain (orange, the brain shifted by FOV/4 either
+way; green, by FOV/2) the clean run reads 1.39 and 0.72 % of the brain mean, the Rician
+floor and the faint readout streaks of a 3D image, and the physio run 2.77 and 2.24 %.
+The zones overlap, because a brain that fills three quarters of the field of view is
+longer than FOV/4, so each zone collects more than one order; the difference of the two
+volumes (right), from which the shared noise cancels, is the clean picture: three
+replicas of the brain at 1.4 and 1.5 % of its signal in the zones, and the same replicas
+on top of the brain, where they are invisible in the control image. Across the 30 volumes
+the predicted amplitudes run from 0.05 to 1.73 %, a different ghost in every volume.
+
+```{code-cell} python
+:tags: [hide-input]
+def reweight(img, w):
+    """The complex image whose interleaved k_y segments carry the weights w[0..3] (the simulator's segment order)."""
+    F = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(img, axes=1), axis=1), axes=1)
+    W = np.asarray(w, float)[(-np.arange(img.shape[1])) % 4]
+    return np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(F * W[None, :, None], axes=1), axis=1), axes=1)
+
+cplx4 = mag4["grase-4shot"] * np.exp(1j * g4.phase().astype(float))
+modeled = np.stack([np.abs(reweight(cplx4[..., k], factors[k])) for k in range(factors.shape[0])], -1)
+global_only = mag4["grase-4shot"] * factors.mean(1)                        # every shot scaled by the volume's mean factor
+print(f"the clean volumes reweighted by their four factors reproduce the physio run to {np.sqrt(((modeled - mag4['grase-4shot-physio']) ** 2)[mask4].mean()):.2f} image units RMS over the brain")
+gm4 = fr_ref["gm"] >= 0.9
+rows3 = {"grase-4shot": quant.subtract(mag4["grase-4shot"], ctx4), "grase-4shot-physio": quant.subtract(mag4["grase-4shot-physio"], ctx4),
+         "the factors' mean alone": quant.subtract(global_only, ctx4)}
+rows3["the replicas alone"] = quant.subtract(modeled, ctx4) - rows3["the factors' mean alone"]
+for name, d in rows3.items():
+    print(f"{name:>24}: per-pair SD of ΔM in GM {d[gm4].std():6.1f}; SD over pairs of the GM mean {np.array([d[..., k][gm4].mean() for k in range(d.shape[-1])]).std():6.1f}; "
+          f"mean ΔM in GM over 15 pairs {d.mean(-1)[gm4].mean():5.1f}")
+```
+
+The reweighting model is exact to 0.35 image units, so the run can be split into what the
+mean factor of each volume does and what the replicas do. The per-pair SD of the
+difference series in gray matter is 13.0 in `grase-4shot` and 115.5 in the physio run.
+Most of that is the mean factor: a control whose four shots averaged a percent above its
+label puts a percent of the control image into the difference, the physiological noise of
+[Chapter 8](./08-noise.md), worth 90.7 units per pair here and a swing of the whole
+series' gray matter mean (the 15-pair mean lands at 3.3 against 33.7 clean, because the
+imbalances did not average out in 15 pairs). The replicas alone add 60.1 units per
+pair: the ghost of the control and the ghost of the label are ghosts of different
+weights, so their difference is a brain-shaped pattern of a percent of the control image,
+larger than the perfusion signal of 34, that changes from volume to volume. For ASL the
+segmentation ghost is therefore noise rather than a fixed artifact, and a loud one: a
+pair's difference image carries a faint extra brain at FOV/4 and FOV/2, and the mean
+over pairs carries whatever did not cancel. It scales with the static signal, so
+background suppression removes it with the tissue it copies, which is the reason the
+white paper pairs segmented 3D readouts with suppression {cite:p}`alsop2015`; what
+suppression leaves, a pipeline treats as it treats the rest of the physiological noise.
 
 ## Part two: the assembled pipeline
 
@@ -655,7 +760,9 @@ uncorrected artifact in the map is fitted as perfusion.
   fields for both {cite:p}`clement2022`.
 - **Look at the background.** Ghosts and spikes are found by windowing the images to the
   noise floor, not by any subtraction; a control image's background is the cheapest QC
-  there is.
+  there is. For a segmented 3D readout, look at the zones FOV/n away along the
+  phase-encode axis: a ghost of the brain there means the shots disagreed, through
+  motion or physiology, and background suppression is what keeps it small.
 - **Plan for rejected pairs.** Three of thirty pairs went here; the scan should be long
   enough that the survivors still meet the SNR the study needs.
 
@@ -667,7 +774,8 @@ SCORE {cite:p}`dolui2017` and the voxel-wise robust estimate that follows it, SC
 {cite:p}`dolui2016`, or by motion-sorted exclusion, ENABLE {cite:p}`shirzadi2018`; the
 quality evaluation index {cite:p}`dolui2017qei`; framewise
 displacement {cite:p}`power2012`; ghost correction from the image phase
-{cite:p}`buonocore1997`; the reverse-polarity distortion estimate {cite:p}`andersson2003`
+{cite:p}`buonocore1997` and the ghosts of inconsistent k-space segments
+{cite:p}`wood1985`; the reverse-polarity distortion estimate {cite:p}`andersson2003`
 and the SDCFlows workflows that grew out of fMRIPrep {cite:p}`esteban2019`; the
 partial-volume regression {cite:p}`asllani2008` and the spatial-prior alternative
 {cite:p}`chappell2011,groves2009`; the GRAPPA reconstruction whose noise structure the

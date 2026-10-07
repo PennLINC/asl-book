@@ -8,8 +8,10 @@ kernelspec:
 :::{admonition} Simulated datasets in this chapter
 :class: note
 - **Built in this page:** the longitudinal timelines of the three tissues under two inversion pulses (`kinetic.tissue_mz`), the pulse-time landscape, and the per-slice residual of a 2D readout ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
-- **`bgsup`**: the reference protocol without pulses (`off`), with two inversion pulses at 2.25 and 3.50 s from the start of labeling (`on`, efficiency 0.95), with perfect pulses (`perfect`, efficiency 1), and with a presaturation pulse added (`presat`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-bgsup)).
+- **`bgsup`**: the reference protocol without pulses (`off`), with two inversion pulses at 2.25 and 3.50 s from the start of labeling (`on`, efficiency 0.95), with perfect pulses (`perfect`, efficiency 1), with a presaturation pulse added (`presat`), and the same pulses under the simulator's bolus-position model, in which a pulse inverts only the label already inside the imaging slab (`on-slab`; `early-slab` moves the first pulse to 2.00 s so that the tail of the bolus misses it) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-bgsup)).
 - **`motion`**: the same random head motion applied to the reference series without (`random`) and with (`random-bgsup`) the two pulses ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-motion)).
+- **`physio`**: the reference protocol with global cardiac, respiratory and drift factors on the tissue signal and a cardiac factor on the label, without (`off`) and with (`on`) the two pulses ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-physio)).
+- **`readout-3d`**: the four-shot 3D GRASE and the stack-of-spirals readouts on the reference labeling, without pulses (`grase-4shot`, `spiral`) and with two pulses at 1.90 and 3.25 s, retimed for the slab's single excitation at 3.6 s (`grase-4shot-bgsup`, `spiral-bgsup`) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-readout-3d)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 :::
@@ -23,13 +25,15 @@ After this chapter you can:
 - state what the pulses do to the label itself, including the sign flip with an odd number of pulses, and correct a quantification for it
 - explain why 2D readouts suppress unevenly across slices and why magnitude images can lose the sign of the difference
 - measure what suppression costs in SNR and in calibration, and what it buys against motion
+- tell the global-bolus model of the label factor from a bolus-position model, derive the retained label when the tail of the bolus misses a pulse, and measure what suppression does to physiological noise
+- show that a 3D readout sees one tissue residual and one label factor in every partition, and time the pulses for the readout actually used
 
 ```{code-cell} python
 :tags: [hide-cell]
 import numpy as np
 import matplotlib.pyplot as plt
 
-from aslbook import data, kinetic, phantom, presets, quant
+from aslbook import data, kinetic, phantom, presets, protocols, quant
 from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, set_style, show_image, show_slice, take_slice
 
 set_style()
@@ -443,16 +447,125 @@ for name in runs:
   from 0.54 to 0.44, and after dividing by 0.81 the error against the truth rises from 10.5
   to 12.9 units RMSE, the same 1/0.81. Recovering the SNR would take 1/0.81² = 1.5 times the
   pairs. In a simulator with only thermal noise, suppression is a pure loss.
-- **The simulator's global-bolus approximation.** aslscan inverts the whole labeled bolus at
-  every pulse, wherever the bolus is, which is what $(1-2\varepsilon)^N$ assumes, and the
-  sidecar says so in `AslscanSimulation.BackgroundSuppressionModel: "global-bolus"`. That is
-  what a non-selective pulse does, and it is the case the white paper describes, in which
-  the blood to be labeled experiences every inversion pulse {cite:p}`alsop2015`.
-  Implementations differ. A slab-selective pulse leaves label that is still in transit
-  below the slab uninverted, so that label arrives with fewer inversions, and with the
-  opposite sign if it missed an odd number of them; $(1-2\varepsilon)^N$ then no longer
-  describes the retained label, and the factor to divide by depends on where the bolus was
-  at each pulse.
+- **The factor 0.81 is a model.** $(1-2\varepsilon)^N$ assumes that every pulse inverts
+  the whole bolus; the next section compares that assumption with a model in which part of
+  the bolus is still outside the imaging slab when a pulse is played.
+
+## The two suppression models: global bolus and bolus position
+
+The label factor of the timeline, $(1-2\varepsilon)^N$, holds if every pulse inverts the
+whole labeled bolus wherever the bolus happens to be. That is the simulator's default, the
+**global-bolus** model (`AslscanSimulation.BackgroundSuppressionModel: "global-bolus"`), and
+it is what a non-selective inversion does; it is also the case the white paper describes,
+in which the blood to be labeled experiences every pulse {cite:p}`alsop2015`. With two
+pulses it is the most label any implementation can retain: a parcel of label that misses
+one of them arrives inverted once, with factor $(1-2\varepsilon) = -0.90$ instead of
+$+0.81$, and subtracts from the rest.
+
+Implementations differ. A **slab-selective** pulse inverts only what is inside the imaging
+region, and at 2.0 or 2.25 s part of the bolus is still in the neck. aslscan's second model,
+**bolus-position** (overlay `background_suppression.model = "bolus-position"` with
+`pulse_region = "slab"` and `slab_entry_time = 0.3`), lets a pulse act on a parcel of label
+only once that parcel is inside the slab: a parcel labeled at time $l$ enters the slab at
+$l + 0.3$ s. The bolus is then a sum of parcels with different factors, no single number
+describes it, `BackgroundSuppressionLabelFactor` is null, and the simulator writes the
+suppressed difference as a separate truth, `deltamSuppressed`, so that the effective factor
+of every voxel is `deltamSuppressed / deltam`. The `bgsup` dataset has the pipeline's pulses
+under this model (`on-slab`) and the same model with the first pulse moved to 2.00 s, just
+after labeling ends (`early-slab`).
+
+```{code-cell} python
+:tags: [hide-input]
+sruns = {name: bgsup.run(name) for name in ["on-slab", "early-slab"]}
+label_rows = [i for i, r in enumerate(ctx) if r == "label"]
+factor_map = {}
+for name, run in sruns.items():
+    dm, ds = run.truth("deltam")[..., label_rows].mean(axis=-1), run.truth("deltamSuppressed")[..., label_rows].mean(axis=-1)
+    factor_map[name] = np.divide(ds, dm, out=np.full(dm.shape, np.nan), where=np.abs(dm) > 1e-6)
+for name, run in {"on": runs["on"], **sruns}.items():
+    sim, bs = run.simulation(), run.simulation()["BackgroundSuppression"]
+    fm = factor_map.get(name)
+    effective = f"sidecar label factor {sim['BackgroundSuppressionLabelFactor']:.2f}" if fm is None else f"GM {np.nanmean(fm[gm]):.3f}, WM {np.nanmean(fm[wm]):.3f} (deltamSuppressed / deltam)"
+    print(f"{name:>10}: pulses {run.sidecar()['BackgroundSuppressionPulseTime']}, model {sim['BackgroundSuppressionModel']}, "
+          f"region {bs.get('PulseRegion', '-')}, slab entry {bs.get('SlabEntryTime', '-')} s; effective factor: {effective}")
+```
+
+With the pulses at 2.25 and 3.50 s the two models agree: the bolus-position factor is 0.810
+in gray and in white matter, the global value. That is a check, not a coincidence. Labeling
+ends at 1.8 s, so the last parcel enters the slab at 2.1 s, before the first pulse, and
+every parcel sees both pulses. Moving the first pulse to 2.00 s changes the picture: the
+parcels labeled after 1.7 s are not yet in the slab, miss it, and arrive inverted once; the
+measured factor is 0.642 in gray matter and 0.594 in white matter. Both numbers follow from
+the timeline. The parcels labeled in $[0, 1.7]$ s carry $(1-2\varepsilon)^2 = 0.81$ and
+those labeled in $[1.7, 1.8]$ s carry $(1-2\varepsilon) = -0.90$. At the readout every parcel
+has arrived (the bolus is complete at ATT + 1.8 s, 2.6 s in gray matter and 3.0 s in white
+matter), has decayed in blood for the same transit time, and has decayed in the tissue for
+$t - l - \mathrm{ATT}$ with the apparent $T_1' = 1/(1/T_1 + f/\lambda)$ of the kinetic
+model ([Chapter 5](../02-labeling/05-kinetic-model.md)), so a parcel's weight at the readout
+is proportional to $e^{l/T_1'}$: later parcels weigh more. The fraction of the difference
+carried by the parcels labeled before $l_c = 1.7$ s is
+
+$$
+w = \frac{e^{l_c/T_1'} - 1}{e^{\tau/T_1'} - 1}, \qquad
+F = (1-2\varepsilon)^2\, w + (1-2\varepsilon)\,(1 - w),
+$$
+
+with $\tau$ the labeling duration.
+
+```{code-cell} python
+:tags: [hide-input]
+bs = sruns["early-slab"].simulation()["BackgroundSuppression"]
+eps, entry = bs["InversionEfficiency"]["Value"], bs["SlabEntryTime"]
+l_cut = sruns["early-slab"].sidecar()["BackgroundSuppressionPulseTime"][0] - entry  # labeled later: outside the slab at the first pulse
+for tissue, sel in [("GM", gm), ("WM", wm)]:
+    t = presets.TISSUES[tissue]
+    t1p = kinetic.t1_prime(t.t1, t.perfusion)
+    w = (np.exp(l_cut / t1p) - 1) / (np.exp(R.labeling_duration / t1p) - 1)
+    f_two, f_one = (1 - 2 * eps) ** 2, 1 - 2 * eps
+    print(f"{tissue}: T1' {t1p:.3f} s; the parcels labeled before {l_cut:.1f} s carry {w:.3f} of the difference at {f_two:.2f}, the rest {1 - w:.3f} at {f_one:+.2f}: "
+          f"predicted factor {f_two * w + f_one * (1 - w):.3f}, measured {np.nanmean(factor_map['early-slab'][sel]):.3f}")
+```
+
+The prediction matches the measured factor in both tissues: 0.642 in gray matter and 0.590
+against 0.594 in white matter. White matter differs from gray matter only through its own
+$T_1'$ (0.827 s against 1.311 s): with a shorter $T_1'$ the early parcels have decayed more
+by the readout, the inverted tail weighs more, and the net factor is lower. The slice timing
+plays no part, because the cut at 1.7 s depends only on when a parcel was labeled, not on
+when the slice is read; the per-slice factors of the `early-slab` run are the same in every
+slice. The figure shows the per-voxel factor in a coronal section and what happens to the
+difference image when a pipeline divides it by the global factor regardless.
+
+```{code-cell} python
+:tags: [hide-input]
+for name, run in sruns.items():
+    sig[name] = signed(run)
+    dm_sig[name] = quant.subtract(sig[name], ctx).mean(axis=-1)
+fig, axes = plt.subplots(1, 4, figsize=(13, 2.6))
+im0 = show_image(axes[0], take_slice(np.where(mask, factor_map["early-slab"], np.nan), CORONAL, "coronal"), "early-slab: factor per voxel", kind="scalar", vmin=0.55, vmax=0.70, aspect=ASPECT)
+fig.colorbar(im0, ax=axes[0], shrink=0.6, pad=0.02)
+for ax, name in zip(axes[1:], ["on", "on-slab", "early-slab"]):
+    im = show_image(ax, take_slice(dm_sig[name] / factors["on"], CORONAL, "coronal"), f"{name}, signed ÷ {factors['on']:.2f}", kind="diff", vmin=-60, vmax=60, aspect=ASPECT)
+side_colorbar(fig, im, "mean difference (image units)")
+for name in ["on", "on-slab", "early-slab"]:
+    r = ratio(dm_sig[name], dm_sig["off"], gm)
+    print(f"{name:>10}: GM ratio of the signed difference to the off run {r:.3f}; after dividing by the global factor {factors['on']:.2f}: {r / factors['on']:.3f}")
+```
+
+The factor map of `early-slab` is a tissue map: 0.64 in gray matter, 0.59 in white matter,
+and nothing else, because the only thing that varies is $T_1'$. The `on` and `on-slab`
+difference images divided by 0.81 are the unsuppressed image again (ratios 1.001 and 1.001
+to the `off` run). The `early-slab` image divided by the same 0.81 is 0.794 of it: a
+pipeline that trusts the global factor delivers a perfusion map about 20 % too low, with a
+white matter value that is low by a further few percent, and nothing in the image says so.
+
+Neither model is the truth for a given scanner. Which pulses are slab-selective, where the
+slab's edge sits relative to the labeling plane, and how long a parcel takes to cross that
+edge decide how much label each pulse catches, and without that knowledge the retained label
+can only be bounded, between the global value and the value with the whole tail inverted.
+The white paper's recommendation is precisely that the pulses invert all of the blood that
+is to be labeled {cite:p}`alsop2015`, and measuring what real pulses do to the label is the
+experiment of {cite:t}`garcia2005`. Where the implementation is not known, the factor is a
+calibration to measure, not a number to look up.
 
 ## See it: motion with and without suppression
 
@@ -512,31 +625,290 @@ be larger still with a 3D readout, whose single null leaves less static signal t
 per-slice average here. The rest of the motion problem, detecting the moved pairs and
 correcting or discarding them, is [Chapter 10](../03-preprocessing/10-motion.md).
 
+## Measure it: physiological noise, with and without suppression
+
+Motion is the largest fluctuation of the static signal, but not the most frequent. The
+heartbeat, breathing and slow drifts change the tissue signal of every volume by a fraction
+of a percent, and that fraction, multiplied by 6200 units, is what the first section of this
+chapter called the enemy. The `physio` dataset puts the simulator's version of it on the
+reference series: at each slice's readout the tissue signal is multiplied by a global factor
+$1 + 0.02 \sin\phi_c + 0.01 \sin\phi_r + 0.01\, x_d$, with a cardiac phase $\phi_c$ at about
+1 Hz, a respiratory phase $\phi_r$ at about 0.25 Hz, and a drift $x_d$ that wanders over
+tens of seconds, and the label is multiplied by $1 + 0.03 \sin\phi_c$ averaged over the
+labeling window. The same process runs without (`off`) and with (`on`) the two pulses, and
+`run.physio()` holds the phases and factors the simulator applied, one row per volume and
+slice. The left panel plots the factors at the display slice; the right panel, the mean
+signed control signal of the pure gray matter voxels of that slice, volume by volume, in the
+four runs that differ only in whether physiology and suppression are on.
+
+```{code-cell} python
+:tags: [hide-input]
+physio = data.load_dataset("physio")
+pruns = {name: physio.run(name) for name in ["off", "on"]}
+psig = {name: signed(run) for name, run in pruns.items()}
+table = pruns["off"].physio()
+at_k = table[table["slice"] == K].sort_values("volume")
+ctl = [i for i, r in enumerate(ctx) if r == "control"]
+fig, (ax_f, ax_s) = plt.subplots(1, 2, figsize=(11, 3.4))
+ax_f.plot(at_k["time"], at_k["tissue_factor"], "o-", color=PALETTE[0], lw=1, label=f"tissue factor at the readout of slice {K}")
+ax_f.plot(at_k["time"], at_k["label_factor"], "s-", color=PALETTE[6], lw=1, label="label factor (mean over the labeling)")
+ax_f.axhline(1, color=INK["secondary"], lw=0.8)
+ax_f.set(xlabel="time (s)", ylabel="factor", title="the simulator's physiological factors, every volume")
+ax_f.legend(loc="lower right")
+series = {"physio/off": psig["off"], "bgsup/off": sig["off"], "physio/on": psig["on"], "bgsup/on": sig["on"]}
+trace_sd = {}
+for (name, s), color in zip(series.items(), [PALETTE[1], PALETTE[0], PALETTE[7], PALETTE[6]]):
+    g = s[:, :, K][gm[:, :, K]][:, ctl].mean(axis=0)
+    trace_sd[name] = g.std(ddof=1)
+    ax_s.plot(np.arange(len(ctl)), g - g.mean(), "o-", lw=1, color=color, label=f"{name} (mean {g.mean():.0f})")
+ax_s.set(xlabel="control volume", ylabel="GM mean − its time mean (image units)", title=f"gray matter control signal at slice {K}, volume by volume")
+ax_s.legend(loc="upper right", ncol=2)
+fig.tight_layout()
+amp = pruns["off"].simulation()["Physio"]
+print(f"tissue amplitudes: cardiac {amp['TissueAmplitudes']['Cardiac']}, respiratory {amp['TissueAmplitudes']['Respiratory']}, drift {amp['TissueAmplitudes']['Drift']}; "
+      f"label: cardiac {amp['LabelAmplitudes']['Cardiac']}; cardiac frequency {amp['CardiacFrequency']} Hz, respiratory {amp['RespiratoryFrequency']} Hz, TR {TR} s")
+steps = np.diff(at_k["cardiac_phase"].values) / (2 * np.pi)
+print(f"the cardiac phase advances by {steps.mean():.1f} ± {steps.std():.2f} cycles between volumes; "
+      f"SD of the tissue factor over the 60 volumes {at_k['tissue_factor'].std():.4f}, of the label factor {at_k['label_factor'].std():.4f}")
+print("SD of the GM mean over the 30 control volumes: " + ", ".join(f"{name} {sd:.1f}" for name, sd in trace_sd.items()) + " image units")
+```
+
+The tissue factor wanders by a few percent and shows no rhythm: a 1 Hz heartbeat sampled
+every 4.5 s advances by 4.6 cycles between volumes, give or take a fifth of a cycle, so
+consecutive samples share no phase, and the cardiac term is a random number in every volume.
+That is aliasing, and it is what a scanner does too: the physiological rhythms are far above
+the Nyquist frequency of any ASL series, and what remains of them in the time series is noise
+with the spectrum of a drift, not a peak that a filter could remove. The SD of the tissue
+factor over the 60 volumes is 0.0187; the label factor, a cardiac modulation averaged over
+1.8 s of labeling, varies by 0.0021. The right panel shows the consequence. The thermal noise
+averages out over the few hundred gray matter voxels of the slice, so the `bgsup/off` trace
+has an SD of 2.2 units; the `physio/off` trace follows the tissue factor with an SD of 92.2
+units and swings of up to about 170, several times the perfusion signal, because a global
+factor is the same in every voxel and does not average out; and the `physio/on` trace shows
+the same factor applied to a static signal of about 650 units, which brings the SD down to
+9.4 units. The measurement
+below compares the four runs in pure gray and white matter: the SD over the 30 control
+volumes, the SD of the 30 pair differences, the temporal SNR of the difference series
+(`quant.tsnr`: the mean over pairs divided by the SD over pairs, voxel by voxel), and the
+error of the mean difference against the truth after dividing by the label factor.
+
+```{code-cell} python
+:tags: [hide-input]
+lab = [i for i, r in enumerate(ctx) if r == "label"]
+print(f"{'run':>10} {'control SD GM':>14} {'control SD WM':>14} {'pair SD GM':>11} {'ΔM GM':>7} {'tSNR GM':>8} {'RMSE vs truth (÷ factor)':>25}")
+for name, s in series.items():
+    d = quant.subtract(s, ctx)
+    fac = factors["on"] if name.endswith("/on") else 1.0
+    csd = s[..., ctl].std(axis=-1, ddof=1)
+    scores[name] = quant.score(d.mean(axis=-1) / fac, truth, mask)["rmse"]
+    print(f"{name:>10} {csd[gm].mean():>14.1f} {csd[wm].mean():>14.1f} {d[gm].std(axis=-1, ddof=1).mean():>11.1f} {d.mean(axis=-1)[gm].mean():>7.1f} "
+          f"{quant.tsnr(d)[gm].mean():>8.3f} {scores[name]:>25.1f}")
+f_k = at_k["tissue_factor"].values
+shift = (f_k[ctl] - f_k[lab]).mean()
+gm_k = gm[:, :, K]
+print(f"at slice {K} the mean over the 30 pairs of the control − label tissue factor is {shift:+.4f}, i.e. {shift * ctrl['off'][:, :, K][gm_k].mean():+.1f} units of the GM control signal; "
+      f"the physio/off mean difference at that slice is {quant.subtract(psig['off'], ctx).mean(axis=-1)[:, :, K][gm_k].mean():+.1f} units against {dm_sig['off'][:, :, K][gm_k].mean():+.1f} without physiology")
+```
+
+Without suppression the physiological factors raise the SD of the control signal in gray
+matter from 39.7 units, the thermal value, to 118.0 (107.2 in white matter), and the SD of a
+pair's difference from 56.1 to 174.0: three times the thermal noise and six times the
+perfusion signal. The mean of 30 pairs does not escape it. The 30 values of the control −
+label tissue factor do not average to zero; at the display slice their mean is −0.0094,
+which multiplied by the gray matter control signal is a shift of −58.8 units of the whole
+difference image, and the measured gray matter difference of that slice is −30.5 units
+where the run without physiology gives +28.4. A global factor does not produce noise in the
+usual sense: it produces an error that is the same fraction of the static signal in every
+voxel, a copy of the anatomy added to the perfusion map, with a magnitude set by how the
+30 random phases happened to fall. The temporal SNR of the `physio/off` run is −0.024 in
+gray matter, the sign being that of this realization, against 0.548 for thermal noise alone,
+and the RMSE of its mean difference against the truth is 54.4 units, five times the 10.5 of
+the thermal run.
+
+With the pulses on, the same factors act on a static signal of a few hundred units instead
+of 6200, and almost nothing is left of them: the control SD is 43.9 in gray matter against
+39.7 thermal, the pair SD 60.9 against 56.1, the temporal SNR 0.448 against 0.444, and the
+RMSE 16.4 against 12.9. The label's own 3 % cardiac modulation, averaged over the labeling,
+is a fraction of a unit and stays, since suppression acts on the tissue and not on the
+label. This reverses the conclusion of the cost section, and it is worth saying explicitly:
+with thermal noise only, suppression lowers the temporal SNR of the difference series from
+0.548 to 0.444; with physiological noise present, it raises it from −0.024 to 0.448, and
+lowers the error of the mean difference from 54.4 to 16.4 units. The thermal-only
+comparison is the one a simulator makes by default and the one that never happens on a
+scanner.
+
+The simulator's physiology is a model, and a modest one. The factors are global, identical
+in every voxel of a slice, so there is no spatial structure to them; there is no pulsatile
+arterial volume, no inflow of unsaturated blood, no change of the head's position with
+breathing, and the amplitudes are fixed at 2, 1 and 1 %. Real physiological noise is larger
+and less uniform: its variance scales with the square of the signal, as the original
+measurements of physiological noise in functional MRI established {cite:p}`kruger2001`, which
+is exactly why removing the static signal removes it, and its spatial pattern (large vessels,
+CSF spaces, the brainstem) is what makes it harder to separate from perfusion than a global
+factor is. The relative gain measured here is therefore a lower bound on what suppression
+buys against physiology, with the same mechanism.
+
+## See it: suppression with a 3D readout
+
+The slice dependence of a 2D readout was the weak point of every picture above: a null
+reached in a few slices, an inverted band below them and a recovered band above. A 3D
+readout excites the whole slab at one instant and reads every partition from that single
+state ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)). The `readout-3d` dataset has the
+four-shot 3D GRASE and the eight-interleaf stack of spirals on the reference labeling, with
+and without two pulses; the sidecar's `AslscanSimulation.Readout` records that every
+partition of every shot is excited at 3.6 s, and `protocols.slice_offsets` returns a single
+zero offset for a 3D sidecar. The pulses are not the 2D ones. The pair of the `bgsup`
+dataset, 2.25 and 3.50 s, was tuned for the middle of a 0.76 s slice readout at 3.98 s, and
+at a slab excitation 0.38 s earlier it would leave gray and white matter still inverted
+(the per-slice curve of the first section, read at its first slice). A readout change
+retimes the pulses, so the 3D runs carry their own pair, read below from the sidecar. The
+figure shows the coronal section of the signed control image, as for the 2D runs above.
+
+```{code-cell} python
+:tags: [hide-input]
+r3d = data.load_dataset("readout-3d")
+truns = {name: r3d.run(name) for name in ["grase-4shot", "grase-4shot-bgsup", "spiral", "spiral-bgsup"]}
+tctx = truns["grase-4shot"].context()
+tsig = {name: signed(run) for name, run in truns.items()}
+tctrl = {name: control_mean(s, tctx) for name, s in tsig.items()}
+tdm = {name: quant.subtract(s, tctx).mean(axis=-1) for name, s in tsig.items()}
+t_exc = truns["grase-4shot-bgsup"].simulation()["Readout"]["ExcitationTimes"][0]
+PULSES_3D = truns["grase-4shot-bgsup"].sidecar()["BackgroundSuppressionPulseTime"]
+fig, axes = plt.subplots(1, 3, figsize=(11, 2.6))
+for ax, name, lim in zip(axes, ["grase-4shot", "grase-4shot-bgsup", "spiral-bgsup"], [7000, 1000, 1000]):
+    im = show_image(ax, take_slice(tctrl[name], CORONAL, "coronal"), f"{name} (window ±{lim})", kind="diff", vmin=-lim, vmax=lim, aspect=ASPECT)
+side_colorbar(fig, im, "signed control signal (image units)")
+for name in ["grase-4shot-bgsup", "spiral-bgsup"]:
+    p, sim = truns[name].sidecar(), truns[name].simulation()
+    print(f"{name:>17}: {p['MRAcquisitionType']} {p['PulseSequenceType']}, {p['NumberShots']} shots, {len(tctx) // 2} pairs, pulses {p['BackgroundSuppressionPulseTime']}, "
+          f"every partition excited at {t_exc} s, slice offsets {protocols.slice_offsets(p)}, model {sim['BackgroundSuppressionModel']}, label factor {sim['BackgroundSuppressionLabelFactor']:.2f}")
+for tissue, t in presets.TISSUES.items():
+    print(f"{tissue:>3}: Mz/M0 at {t_exc} s with pulses at {PULSES_3D[0]:g} and {PULSES_3D[1]:g} s: {kinetic.tissue_mz(1.0, t.t1, TR, t_exc, PULSES_3D, 0.95):+.3f}", end="; ")
+print()
+```
+
+There is no band. With the pulses at 1.9 and 3.25 s the timeline puts gray matter at
+−0.012 and white matter at −0.029 of $M_0$ at the 3.6 s excitation, and the suppressed 3D
+control image (note the window, ±1000 against ±3000 for the 2D runs) is a faint, uniform
+negative from the bottom of the slab to the top, with CSF (+0.099, the tissue no two-pulse
+scheme nulls with the other two) the only bright structure. The next figure measures it
+partition by partition: the ratio of the suppressed to the unsuppressed control signal in
+pure gray and white matter, against `kinetic.tissue_mz` at 3.6 s with the sidecar's pulses
+divided by the unsuppressed steady state, and the ratio of the signed difference images,
+which is the label factor. Ratios are used rather than absolute values because the 3D
+control signal is also lowered by the echo train and the through-plane point-spread
+function ([Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md)), which the
+suppressed and the unsuppressed run share.
+
+```{code-cell} python
+:tags: [hide-input]
+fig, (ax_c, ax_l) = plt.subplots(1, 2, figsize=(11, 3.4))
+pred, per = {}, {}
+for tissue in ["GM", "WM"]:
+    t = presets.TISSUES[tissue]
+    pred[tissue] = kinetic.tissue_mz(1.0, t.t1, TR, t_exc, PULSES_3D, 0.95) / kinetic.tissue_se(1.0, t.t1, TR)
+    ax_c.axhline(pred[tissue], color=TISSUE_COLORS[tissue], lw=1, ls="--")
+for base, marker in [("grase-4shot", "o"), ("spiral", "s")]:
+    fr3 = truns[base].fractions()
+    for tissue, sel in [("GM", fr3["gm"] >= 0.9), ("WM", fr3["wm"] >= 0.9)]:
+        zs = [z for z in range(R.n_slices) if sel[:, :, z].sum() > 20]
+        per[base, tissue] = np.array([tctrl[base + "-bgsup"][:, :, z][sel[:, :, z]].mean() / tctrl[base][:, :, z][sel[:, :, z]].mean() for z in zs])
+        ax_c.plot(zs, per[base, tissue], marker, color=TISSUE_COLORS[tissue], mec=INK["primary"], label=f"{tissue}, {base}")
+        if tissue == "GM":
+            per[base, "label"] = np.array([tdm[base + "-bgsup"][:, :, z][sel[:, :, z]].mean() / tdm[base][:, :, z][sel[:, :, z]].mean() for z in zs])
+            ax_l.plot(zs, per[base, "label"], marker, color=PALETTE[6], mec=INK["primary"], label=f"GM, {base}")
+ax_l.axhline(factors["on"], color=PALETTE[6], lw=1, ls="--")
+ax_c.axhline(0, color=INK["secondary"], lw=0.8)
+ax_c.set(xlabel="partition", ylabel="suppressed / unsuppressed control", title=f"control signal per partition (dashed: tissue_mz at {t_exc:g} s)", xticks=range(0, 20, 4), ylim=(-0.06, 0.02))
+ax_l.set(xlabel="partition", ylabel="suppressed / unsuppressed difference", title=f"label factor per partition (dashed: {factors['on']:.2f})", xticks=range(0, 20, 4), ylim=(0.7, 0.9))
+ax_c.legend(fontsize=7, ncol=2, loc="lower right")
+ax_l.legend(fontsize=7)
+fig.tight_layout()
+for base in ["grase-4shot", "spiral"]:
+    print(f"{base:>11}: control ratio GM {per[base, 'GM'].mean():+.3f} ({per[base, 'GM'].min():+.3f} to {per[base, 'GM'].max():+.3f}; predicted {pred['GM']:+.3f}), "
+          f"WM {per[base, 'WM'].mean():+.3f} ({per[base, 'WM'].min():+.3f} to {per[base, 'WM'].max():+.3f}; predicted {pred['WM']:+.3f}); "
+          f"label factor GM {per[base, 'label'].mean():.3f} ({per[base, 'label'].min():.3f} to {per[base, 'label'].max():.3f})")
+print("grase-4shot, GM control ratio per partition: " + " ".join(f"{v:+.3f}" for v in per["grase-4shot", "GM"]))
+print("grase-4shot, GM label factor per partition:  " + " ".join(f"{v:.3f}" for v in per["grase-4shot", "label"]))
+```
+
+Every partition reads the same state. In the GRASE run the gray matter control ratio is
+−0.012 in every partition, between −0.013 and −0.011, where the 2D run went from −0.17 to
++0.33 across the slab; white matter sits at −0.026 (−0.027 to −0.025) against the
+prediction of −0.029, the small gap being the through-plane point-spread function mixing
+each partition with its neighbors; the spiral gives the same numbers. The static signal of
+gray matter is down to 1.2 % of its unsuppressed value, where the 2D `on` run's slab
+average was 250 of 6246 units, 4 %. The label factor is 0.810 in every partition, 0.807 to 0.811 in the GRASE run,
+0.809 to 0.811 in the spiral run. What a 2D readout gave slice by slice, a 3D readout gives
+once.
+
+```{code-cell} python
+:tags: [hide-input]
+t1s = (presets.TISSUES["GM"].t1, presets.TISSUES["WM"].t1)
+best3, resid3 = kinetic.optimal_suppression_times(t1s, t_exc, TR, n_pulses=2, n_grid=60)
+rms = lambda pulses: np.sqrt(np.mean([kinetic.tissue_mz(1.0, t1, TR, t_exc, pulses, 0.95) ** 2 for t1 in t1s]))
+fr3 = truns["grase-4shot"].fractions()
+gm3, wm3 = fr3["gm"] >= 0.9, fr3["wm"] >= 0.9
+mag_on, mag_off = (quant.subtract(truns[name].mag(), tctx).mean(axis=-1) for name in ["grase-4shot-bgsup", "grase-4shot"])
+print(f"RMS of Mz/M0 over GM and WM at the {t_exc:g} s excitation: the 2D pulses at {PULSES[0]:g} and {PULSES[1]:g} s {rms(PULSES):.3f}; "
+      f"the 3D runs' pulses at {PULSES_3D[0]:g} and {PULSES_3D[1]:g} s {rms(PULSES_3D):.3f}; the grid optimum {best3[0]:.2f} and {best3[1]:.2f} s {resid3:.3f}; "
+      f"the first 3D pulse falls {PULSES_3D[0] - R.labeling_duration:+.2f} s from the end of labeling")
+print(f"ratio of the magnitude-image difference, grase-4shot-bgsup to grase-4shot: GM {ratio(mag_on, mag_off, gm3):+.3f}, WM {ratio(mag_on, mag_off, wm3):+.3f}")
+```
+
+Two remarks. First, the pulse times belong to the readout. The 2D pair leaves an RMS residual
+of 0.276 at the 3.6 s excitation, the 3D runs' pair 0.022, and the grid optimum for 3.6 s,
+pulses at 1.89 and 3.23 s, 0.005: the one-instant readout can be nulled far better than any
+slice of the 2D series, but only with its own pulse times. The price is that the first pulse
+moves early: at 1.9 s it falls 0.10 s after labeling ends, and under the bolus-position model
+of the two-models section the parcels labeled in the last 0.2 s would still be outside the
+slab and miss it, exactly the `early-slab` situation; the better the 3D nulling, the more the
+retained label depends on the implementation. Second, the magnitude-sign problem changes
+character. With one null time for the whole slab the residual has the same sign and size in
+every partition, so the sign ambiguity is no longer a band across the slab but a uniform
+property of the volume; the magnitude-image difference is −0.811 of the unsuppressed one in
+white matter, a single global sign flip, and −0.776 in gray matter, where the residual of
+about 70 units is close enough to zero that in some voxels the noise carries the control
+across it and the pair loses its sign. A small positive residual chosen once for the whole
+volume removes that at a uniform, known cost in suppression; a 2D readout cannot choose one
+residual for every slice.
+
 ## Measure it: the difference image against the truth
 
 ```{code-cell} python
 :tags: [hide-input]
 print(f"{'run':>14} {'RMSE of the mean difference vs truth, brain (image units)':>60}")
-for name in ["off", "on", "perfect", "presat", "random", "random-bgsup"]:
+for name in ["off", "on", "perfect", "presat", "random", "random-bgsup", "physio/off", "physio/on"]:
     print(f"{name:>14} {scores[name]:>60.1f}")
 ```
 
 For the still series the ranking is set by the label factor alone: 10.5 units for `off` and
 `perfect`, 12.9 for `on` and `presat`. For the moving series it is set by the static signal:
-63 without suppression, 23 with it, from the same poses.
+63 without suppression, 23 with it, from the same poses. For the series with physiological
+fluctuation it is set by the static signal again: 54.4 without suppression, 16.4 with it.
 
 ## What this implies for acquisition
 
 - **Use background suppression** in any protocol quantified from many pairs: physiological
   fluctuation and motion, not thermal noise, limit real ASL, and both scale with the static
   signal {cite:p}`alsop2015`.
-- **Pair it with a 3D readout.** A 2D readout is nulled in a few slices and inverted or
-  recovered in the rest; a segmented 3D readout sees one null everywhere
-  {cite:p}`vidorreta2013`.
+- **Pair it with a 3D readout, and time the pulses for it.** A 2D readout is nulled in a
+  few slices and inverted or recovered in the rest (−0.17 to +0.33 of $M_0$ in gray matter
+  across the slab); the 3D GRASE and spiral runs read every partition at the same −0.012
+  with the same label factor 0.810 {cite:p}`vidorreta2013`. The pulse times that serve a 2D
+  readout's middle slice would leave a 3D slab excited at 3.6 s inverted; the 3D runs' pair
+  at 1.90 and 3.25 s is a different one.
 - **Leave a small positive residual** rather than aiming at the exact null, unless the phase
-  is saved: a magnitude image cannot tell −0.2 $M_0$ from +0.2 $M_0$.
+  is saved: a magnitude image cannot tell −0.2 $M_0$ from +0.2 $M_0$. With a 3D readout the
+  margin is one number for the whole volume.
 - **Acquire the M0 scan without pulses**, and record the pulse times, their number and their
   efficiency in the sidecar so that the quantification can divide by $(1-2\varepsilon)^N$.
+- **Know the suppression implementation.** $(1-2\varepsilon)^N$ is the global-bolus value and
+  an upper bound; if a pulse is slab-selective and part of the bolus is still outside the
+  slab when it is played, the tail of the bolus arrives with the opposite sign, and the
+  `early-slab` run loses 21 % of its perfusion signal to a factor no sidecar field records.
+  Where the pulses, the slab edge and the transit into the slab are not documented, measure
+  the factor against an unsuppressed acquisition rather than looking it up.
 - **Budget the loss.** Two pulses at ε = 0.95 cost 19 % of the label and 1.5 times the pairs
   for the same thermal SNR; more pulses suppress more tissues and cost more label, and an odd
   number flips the sign of the difference.
@@ -547,4 +919,5 @@ Multiple inversion recovery to null static tissue {cite:p}`dixon1991`; backgroun
 suppression for ASL {cite:p}`ye2000`; the efficiency of inversion pulses and its effect on
 the label {cite:p}`garcia2005`; the optimization of the pulse timing {cite:p}`maleki2012`;
 the sidecar fields that record the pulses {cite:p}`clement2022`; the white paper's recommendations on suppression and 3D
-readouts {cite:p}`alsop2015`; 2D versus 3D readouts with suppression {cite:p}`vidorreta2013`.
+readouts {cite:p}`alsop2015`; 2D versus 3D readouts with suppression {cite:p}`vidorreta2013`;
+physiological noise scaling with the signal it rides on {cite:p}`kruger2001`.

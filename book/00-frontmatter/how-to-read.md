@@ -162,6 +162,6 @@ it then.
 - The reference protocol is the book's 2D pseudo-continuous ASL acquisition: labeling
   duration 1.8 s, post-labeling delay 1.8 s, TR 4.5 s, TE 12 ms, 3.5 × 3.5 × 5 mm voxels, 20
   slices 40 ms apart, 30 control-label pairs, a separate M0 scan at TR 8 s. It follows the
-  ASL white paper's recommendations {cite:p}`alsop2015` for 2D acquisitions within what the
-  simulator models,
-  and every other dataset changes one thing at a time from it.
+  ASL white paper's recommendations {cite:p}`alsop2015` for 2D acquisitions, and every other
+  dataset changes one thing at a time from it, the readout included: the same labeling is
+  also simulated with the 3D readouts the white paper prefers.
