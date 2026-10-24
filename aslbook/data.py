@@ -258,6 +258,7 @@ def asset_name(key: str) -> str:
 def _fetcher(registry: dict[str, str]):
     import pooch  # imported lazily so the package works without network access
 
+    pooch.get_logger().setLevel("WARNING")  # the "Downloading file" lines are not a page's output
     base = f"https://github.com/{_REPO}/releases/download/{DATA_TAG}/"
     return pooch.create(
         path=pooch.os_cache("aslbook"),
