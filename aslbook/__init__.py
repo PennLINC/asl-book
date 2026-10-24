@@ -12,6 +12,8 @@ quant     : subtraction, CBF quantification, multi-delay fitting, partial-volume
 data      : fetch and load the pre-simulated aslscan datasets (pooch registry, local override)
 truth     : the ground-truth maps of a simulated run and the comparison metrics
 cookbook  : render the aslscan inputs and commands behind every dataset (Appendix A)
+traces    : timed head-motion traces (nods, steps, drifts) written from the recipes in datasets.yaml
+motion    : rigid poses, resampling, a small registration with four costs, and the pipelines' motion summaries
 plotting  : house style for slice mosaics, error maps, fit-vs-truth panels
 """
 

@@ -40,6 +40,19 @@ def slice_timing(n_slices: int, spacing: float) -> list[float]:
     return [round(i * spacing, 6) for i in range(n_slices)]
 
 
+def multiband_slice_timing(n_slices: int, mb: int, spacing: float) -> list[float]:
+    """Interleaved multiband timing: ``n_slices / mb`` shots ``spacing`` apart, shot ``g``
+    exciting the slices ``g, g + n_shots, g + 2 n_shots, ...`` (the groups are spread evenly
+    through the stack, as simultaneous multi-slice sequences do), the even-numbered groups
+    first and then the odd ones, so neighbouring slices are never excited back to back."""
+    if n_slices % mb:
+        raise ValueError(f"{n_slices} slices are not a multiple of the multiband factor {mb}")
+    n_shots = n_slices // mb
+    order = list(range(0, n_shots, 2)) + list(range(1, n_shots, 2))
+    position = {g: i for i, g in enumerate(order)}
+    return [round(position[s % n_shots] * spacing, 6) for s in range(n_slices)]
+
+
 def pcasl(
     pld: float | list[float] = presets.REFERENCE.post_labeling_delay,
     ld: float = presets.REFERENCE.labeling_duration,
@@ -53,6 +66,7 @@ def pcasl(
     slice_spacing: float | None = None,
     te: float | None = None,
     background_suppression: list[float] | None = None,
+    multiband: int | None = None,
     extra: dict[str, Any] | None = None,
 ) -> Protocol:
     """A (P)CASL sidecar. ``pld`` may be a list with one entry per acquired volume (multi-delay).
@@ -71,7 +85,7 @@ def pcasl(
         "TotalAcquiredPairs": n_pairs,
         "RepetitionTimePreparation": tr,
     })
-    _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra)
+    _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra, multiband)
     return p
 
 
@@ -88,6 +102,7 @@ def pasl(
     slice_spacing: float | None = None,
     te: float | None = None,
     background_suppression: list[float] | None = None,
+    multiband: int | None = None,
     extra: dict[str, Any] | None = None,
 ) -> Protocol:
     """A PASL (FAIR) sidecar with a bolus cut-off, which fixes the bolus duration at ``cutoff``.
@@ -107,16 +122,21 @@ def pasl(
         "TotalAcquiredPairs": n_pairs,
         "RepetitionTimePreparation": tr,
     })
-    _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra)
+    _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra, multiband)
     return p
 
 
-def _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra):
+def _finish(p, voxel_mm, n_slices, slice_spacing, te, background_suppression, extra, multiband=None):
     r = presets.REFERENCE
     if voxel_mm is not None:
         p["AcquisitionVoxelSize"] = list(voxel_mm)
     if n_slices is not None or slice_spacing is not None:
         p["SliceTiming"] = slice_timing(n_slices or r.n_slices, slice_spacing or r.slice_spacing)
+    if multiband:
+        # simultaneous multi-slice: n_slices / multiband shots, the sidecar's factor plus a
+        # SliceTiming in which every shot's slices share one time (aslscan derives the shots from it)
+        p["MultibandAccelerationFactor"] = int(multiband)
+        p["SliceTiming"] = multiband_slice_timing(n_slices or r.n_slices, int(multiband), slice_spacing or r.slice_spacing)
     if te is not None:
         p["EchoTime"] = te
     if background_suppression:

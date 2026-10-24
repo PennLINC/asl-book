@@ -285,6 +285,7 @@ for ds, entry in cfg["datasets"].items():
 | [`look-locker`](../appendices/a-aslscan-cookbook.md#ds-look-locker) | eight low-flip readouts after each pulsed label |
 | [`multi-te`](../appendices/a-aslscan-cookbook.md#ds-multi-te) | three echoes per excitation with a finite exchange time |
 | [`vascular`](../appendices/a-aslscan-cookbook.md#ds-vascular) | an arterial compartment at short delays, uncrushed and crushed |
+| [`motion-readouts`](../appendices/a-aslscan-cookbook.md#ds-motion-readouts) | one timed head-motion trace replayed on a 2D EPI, a multiband EPI, a single-shot and a four-shot 3D GRASE and a stack of spirals, every shot at the pose of its own time |
 
 ## The ground truth
 

@@ -353,6 +353,32 @@ signal of every volume before crushing (`desc-deltamArterial_gt`), so that the c
 uncrushed series can be scored against it
 ([Chapter 19](../05-advanced/19-frontiers.md)).
 
+(ds-motion-readouts)=
+### motion-readouts
+
+```{code-cell} python
+:tags: [hide-input]
+describe("motion-readouts")
+```
+
+The `motion.trace` table is not an aslscan key but the pipeline's recipe for one: `aslbook.traces`
+writes it as `inputs/<run>/motion.tsv`, a timed trace with a `time` column at the given rate
+(the same nods, steps and drifts aslscan's `tools/motion_trace.py` composes), and the overlay
+the simulator reads says `trajectory = "<that file>"`. The simulator then samples the trace at
+every 2D shot's or 3D segment's own excitation time (`within_volume_sampling = "shot"`, the
+default for a timed trace) and writes the poses to `desc-motionShots_gt.tsv`; `epi-volume`
+asks for `"volume"` instead, and `epi-spinhistory` adds `spin_history = true`, whose
+correction is written as `desc-spinHistory_gt`. The 3D runs' motion-free partners are
+`readout-3d`'s `grase-1shot`, `grase-4shot` and `spiral`, which share their protocol and seed
+([Chapter 10.1](../03-preprocessing/10a-motion-within-a-volume.md)).
+
+```{code-cell} python
+:tags: [hide-input]
+from aslbook import traces
+print(traces.describe(cookbook.expand(cfg, "motion-readouts")[1].overlay["motion"]["trace"]))
+cookbook.print_tree(cfg, "motion-readouts")
+```
+
 ## Regenerating a dataset
 
 Every dataset directory carries a `provenance.json` with the exact command lines, the

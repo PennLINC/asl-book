@@ -26,6 +26,18 @@ After this chapter you can:
 - explain why a movement between the shots of a segmented 3D readout produces ghosts inside one volume rather than a displaced volume, measure them, and say why they are rejected rather than registered
 - choose acquisition settings that reduce the damage at the source
 
+:::{admonition} Two chapters follow this one
+:class: note
+This chapter moves whole volumes and corrects them as whole volumes, which is the
+right model for motion *between* volumes. [Chapter 10.1](./10a-motion-within-a-volume.md)
+replays one timed head movement inside the readouts of a 2D EPI, a multiband EPI, a
+single-shot and a segmented 3D GRASE, and a stack of spirals, where each slice or segment
+is acquired at its own pose and no rigid transform fits the result.
+[Chapter 10.2](./10b-registering-asl.md) is about the registration itself: the several
+contrasts an ASL series contains, the similarity measures and reference images a pipeline
+can choose, the biases each choice carries, and what the published pipelines do.
+:::
+
 ```{code-cell} python
 :tags: [hide-cell]
 import os
@@ -35,45 +47,25 @@ import matplotlib.pyplot as plt
 from scipy import ndimage, optimize
 
 from aslbook import data, phantom, plotting, presets, quant
+from aslbook.motion import move_volume, register_volume
 from aslbook.plotting import INK, PALETTE, set_style, show_slice
 
 set_style()
 K = phantom.DISPLAY_SLICE
-VOX = np.array(presets.REFERENCE.voxel_mm)          # mm along the image axes x, y, z
-
-def rotation(rx, ry, rz):
-    """R = Rz Ry Rx for angles in degrees, the simulator's order."""
-    rx, ry, rz = np.radians([rx, ry, rz])
-    Rx = np.array([[1, 0, 0], [0, np.cos(rx), -np.sin(rx)], [0, np.sin(rx), np.cos(rx)]])
-    Ry = np.array([[np.cos(ry), 0, np.sin(ry)], [0, 1, 0], [-np.sin(ry), 0, np.cos(ry)]])
-    Rz = np.array([[np.cos(rz), -np.sin(rz), 0], [np.sin(rz), np.cos(rz), 0], [0, 0, 1]])
-    return Rz @ Ry @ Rx
-
-def pose_to_voxels(t_mm, r_deg, shape, undo=False):
-    """ndimage's (matrix, offset) for a pose p' = R (p - c) + c + t in mm about the
-    field-of-view center c. undo=False resamples an image the way the pose moves the head
-    (output voxel q takes the input at pose^-1 q); undo=True moves it back."""
-    c = (np.array(shape[:3]) - 1) / 2 * VOX
-    R, t = rotation(*r_deg), np.asarray(t_mm, float)
-    M, off = (R, c + t - R @ c) if undo else (R.T, c - R.T @ (c + t))
-    return M * VOX[None, :] / VOX[:, None], off / VOX      # mm -> voxel coordinates
-
-def move_volume(vol, t_mm, r_deg, undo=False, order=1):
-    M, off = pose_to_voxels(t_mm, r_deg, vol.shape, undo)
-    return ndimage.affine_transform(vol, M, offset=off, order=order, mode="nearest")
-
-def register_volume(moving, target, pts):
-    """Rigid registration: the pose (tx, ty, tz in mm, rx, ry, rz in degrees) whose undoing
-    best maps `moving` onto `target`, by the mean squared difference at the sample voxels
-    `pts` (3, N), minimized with Powell's method from the identity."""
-    tv = target[tuple(pts.astype(int))]
-
-    def cost(p):
-        M, off = pose_to_voxels(p[:3], p[3:], moving.shape, undo=True)
-        return np.mean((ndimage.map_coordinates(moving, M @ pts + off[:, None], order=1, mode="nearest") - tv) ** 2)
-
-    return optimize.minimize(cost, np.zeros(6), method="Powell", options={"xtol": 1e-3, "ftol": 1e-6}).x
 ```
+
+:::{dropdown} The rigid-motion helpers (`aslbook.motion`)
+The page's registration is small enough to read in full, and the two chapters that follow
+reuse it, so it lives in the helper package. A pose moves a point at $p$ (mm, along the image
+axes) to $R\,(p - c) + c + t$ about the field-of-view center $c$, with $R = R_z R_y R_x$;
+`move_volume(vol, t_mm, r_deg)` resamples a volume by that pose (trilinear) and
+`move_volume(..., undo=True)` moves it back. `register_volume(moving, target, pts)` returns
+the six parameters whose undoing best maps `moving` onto `target`: the similarity is
+evaluated only at the sample voxels `pts` (a few thousand brain voxels), by default the mean
+squared difference, and Powell's method searches from the identity. The same function takes
+`cost="ncc"`, `"corratio"` or `"nmi"` for the other similarity measures that
+[Chapter 10.2](./10b-registering-asl.md) compares.
+:::
 
 ## The physics
 
@@ -268,10 +260,10 @@ it searches for the six pose parameters whose undoing makes the volume most simi
 reference, then resamples the volume with them. MCFLIRT {cite:p}`jenkinson2002`, part of
 FSL {cite:p}`smith2004`, and SPM's realign {cite:p}`friston1995` are the tools most ASL
 pipelines use {cite:p}`adebimpe2022,mutsaerts2020`.
-The version in the setup cell is small enough to read in full: the reference is the mean
-control image, both images are smoothed by about a voxel, the similarity is the mean
-squared difference at 6000 brain voxels, and Powell's method {cite:p}`powell1964` searches
-from the identity.
+The version in `aslbook.motion` (the dropdown above the setup cell) is small enough to
+read in full: the reference is the mean control image, both images are smoothed by about
+a voxel, the similarity is the mean squared difference at 6000 brain voxels, and Powell's
+method {cite:p}`powell1964` searches from the identity.
 The smoothing matters more than it looks: resampling a noisy volume also averages its
 noise, so without it the search prefers a shift of half a voxel, where the noise is
 averaged most, to the true shift.

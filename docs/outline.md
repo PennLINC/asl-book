@@ -191,6 +191,34 @@ poses from `desc-motion_gt.tsv`: score the estimated poses and the ΔM/CBF error
 after correction and rejection; `readout-3d` (grase-4shot-shotmotion and its
 `desc-motionEvents_gt.tsv`).
 
+### Chapter 10.1 — Motion inside a volume: what each readout makes of it
+A volume is not an instant: 0.76 s of slices for the 2D EPI, 0.2 s for a four-fold
+multiband EPI, one excitation for a single-shot 3D readout, 18 s for the four-shot GRASE
+and 36 s for the eight-interleaf stack of spirals. One timed motion trace (a 0.6 s nod
+inside a readout, a step that stays, a slow drift) replayed on each readout with every 2D
+shot or 3D segment at the pose of its own excitation time (aslscan P9/P10): staggered
+slices and spin-history bands in 2D, groups of slices in multiband, replicas of the brain
+along the phase-encode axis in the segmented GRASE, rings and smears outside the brain in
+the spiral, nothing but a rigid displacement in the single-shot 3D; the per-volume view of
+the same trace for comparison; why no rigid pose fits a staggered volume, what a
+slice-by-slice registration recovers, and what is left to rejection, scored per readout
+against the motion-free partner. *Pipeline:* `motion-readouts` (epi, epi-volume,
+epi-spinhistory, mb4, grase-1shot, grase, spiral, with still partners), `readout-3d`.
+
+### Chapter 10.2 — Registering an ASL series: contrasts, references, and what pipelines do
+The contrasts in one series (control, label, M0, suppressed, each readout's own, white
+matter brighter than gray in the 3D readouts); the four similarity measures and their cost
+curves, least squares across contrasts (converges on the unsuppressed series, diverges
+between a suppressed series and the M0); the spurious label-control offset of a common
+cross-contrast reference and the offset step that removes it; the blur bias of an averaged
+reference; the reference images scored on the drift run (control mean, mean of every
+volume, M0 by NMI and by least squares, own-type templates with and without the offset
+step, a second pass on the aligned mean, the mean ΔM); the zig-zag regression (perfect on a
+still head, aliases spikes, halves a drift's within-pair step); the arterial signal at short
+delays; what ASLPrep, ExploreASL, ASLtbx, BASIL/oxford_asl and the engines (MCFLIRT, SPM
+realign, 3dvolreg, ANTs) do, and prospective correction. *Pipeline:* `ref-pcasl`, `bgsup`
+(on), `readout-3d` (grase-4shot, spiral), `motion` (drift, random), `vascular`.
+
 ### Chapter 11 — Susceptibility distortion
 Field map → displacement along phase encode ∝ Δf × TotalReadoutTime; pile-up and
 stretching; where it hits ASL (frontal and temporal GM); blip-up/blip-down pairs and the
@@ -309,3 +337,4 @@ does not model. *Pipeline:* `multi-te`, `vascular`.
 | `look-locker` | pasl-ll | eight readouts after each pulsed label | 18 |
 | `multi-te` | ge-pld10, ge-pld18, se-pld10 | three echoes per excitation, a finite exchange time | 16, 19 |
 | `vascular` | none, uncrushed, crushed | the arterial compartment and vascular crushing | 5, 19 |
+| `motion-readouts` | epi-still, epi, epi-volume, epi-spinhistory, mb4-still, mb4, grase-1shot, grase, spiral | one timed motion trace on four readouts, each shot at its own pose | 10 |

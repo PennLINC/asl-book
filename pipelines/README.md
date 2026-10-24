@@ -12,7 +12,7 @@ wsl -e bash -lc "cd /mnt/c/Users/tsalo/Documents/linc/asl-book/pipelines && micr
 |---|---|
 | `config/datasets.yaml` | single source of truth: the pinned simulator commits, the phantoms, the shared protocol and overlay, every dataset's runs |
 | `scripts/prepare_phantom.py` | crops aslscan's 1 mm ASLDRO phantom to the book's 100 mm slab, adds the synthetic field map, and packages the tissue fractions on the acquisition grid into `aslbook/data/` for the toy tier |
-| `scripts/run_dataset.py` | expands one dataset entry into aslscan runs through `aslbook.cookbook`, writes each run's `asl.json` / `aslcontext.tsv` / `overlay.toml`, runs the simulator, adds the tissue-fraction derivatives, writes `provenance.json` |
+| `scripts/run_dataset.py` | expands one dataset entry into aslscan runs through `aslbook.cookbook`, writes each run's `asl.json` / `aslcontext.tsv` / `overlay.toml` (and `motion.tsv`, the timed motion trace written from a `motion.trace` recipe by `aslbook.traces`), runs the simulator, adds the tissue-fraction derivatives, writes `provenance.json` |
 | `scripts/package_release.py` | copies every file to flat release assets, writes the sha256 registry `aslbook/registry.txt` |
 | `Snakefile` | the `phantoms` rule and one `simulate` rule per dataset |
 

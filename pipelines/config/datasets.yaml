@@ -2,13 +2,20 @@
 # Every pipeline run reads its parameters from here, and Appendix A (cookbook) and B (manifest)
 # are rendered from the same file, so the three cannot drift. Schema: aslbook.cookbook.
 
-# Pinned tools. The commits are recorded in every dataset's provenance.json.
+# Pinned tools. The commits are recorded in every dataset's provenance.json. The checkouts are
+# git worktrees of the two repositories at the pinned commits (aslscan main after the per-shot
+# and timed-trajectory motion work, P9 and P10), built in WSL with
+#   CARGO_TARGET_DIR=/home/tsalo/.cache/aslscan-book-main-target cargo build --release --features cli,kspace,par
+# The datasets simulated before this pin (aslscan 6da6ca2, mrsim-acq 17f3fb9) are reproduced
+# byte for byte by this binary, except the two GRAPPA runs (noise-sweep/coils8-r2 and
+# kitchen-sink), whose kernel aslscan now fits once per series; they were not re-simulated, and
+# each dataset's provenance.json records the commit it came from.
 tools:
-  aslscan_repo: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan
-  aslscan_bin: /mnt/c/Users/tsalo/Documents/rust-trx/aslscan/target/release/aslscan
-  aslscan_commit: "6da6ca2"
-  mrsim_acq_repo: /mnt/c/Users/tsalo/Documents/rust-trx/mrsim-acq
-  mrsim_acq_commit: "17f3fb9"
+  aslscan_repo: /mnt/c/Users/tsalo/Documents/rust-trx/book-main/aslscan
+  aslscan_bin: /home/tsalo/.cache/aslscan-book-main-target/release/aslscan
+  aslscan_commit: "bf58c8c"
+  mrsim_acq_repo: /mnt/c/Users/tsalo/Documents/rust-trx/book-main/mrsim-acq
+  mrsim_acq_commit: "63fb68a"
 
 # The phantom: ASLDRO's hrgt_icbm_2009a_nls_3t (1 mm, one constant per tissue), converted by
 # aslscan's tools/hrgt_to_bids.py, cropped by pipelines/scripts/prepare_phantom.py to a 100 mm
@@ -276,3 +283,35 @@ datasets:
       - { name: none }
       - { name: uncrushed, overlay: { macrovascular: { arterial_blood_volume: { grey_matter: 0.02, white_matter: 0.008, csf: 0.0 }, arterial_transit_time: { grey_matter: 0.5, white_matter: 0.9, csf: 0.0 } } } }
       - { name: crushed, protocol: { extra: { VascularCrushing: true, VascularCrushingVENC: 4.0 } }, overlay: { macrovascular: { arterial_blood_volume: { grey_matter: 0.02, white_matter: 0.008, csf: 0.0 }, arterial_transit_time: { grey_matter: 0.5, white_matter: 0.9, csf: 0.0 } }, vascular_crushing: { arterial_velocity: { grey_matter: 10.0, white_matter: 6.0, csf: 3.0 } } } }
+  motion-readouts:
+    description: >-
+      one timed head-motion trace, sampled at 20 Hz, replayed on four readouts so that each 2D
+      shot or 3D segment is acquired at the pose of its own excitation time: a brief nod (1 mm
+      anterior, 1.5 mm up, 2 degrees of pitch, 0.6 s from onset to return) that begins 0.05 s
+      before the seventh repetition's readout, a step (1.5 mm to the left, 1 degree of yaw over
+      0.5 s) at 90.3 s that stays, and a slow ramp of 1 mm, 0.5 mm and 0.7 degrees over the first
+      270 s; on the reference 2D EPI (15 pairs), the same with the trace sampled once per volume
+      (what a per-volume simulator renders) and with spin history, on a four-fold multiband EPI
+      (five shots 40 ms apart), and on the single-shot and four-shot 3D GRASE and the stack of
+      spirals of readout-3d; with still partners for the two 2D readouts (the 3D still partners
+      are readout-3d's grase-1shot, grase-4shot and spiral, same seed)
+    chapters: [10]
+    protocol: { n_pairs: 15 }
+    variants:
+      - { name: epi-still }
+      - name: epi
+        overlay:
+          motion: &trace
+            mode: trajectory
+            trace:
+              rate: 20
+              duration: 1200
+              nod: "start=35.05,rise=0.15,hold=0.3,fall=0.15,trans=0:1.0:1.5,rot=0.035:0:0"
+              step: ["start=90.3,rise=0.5,trans=-1.5:0:0,rot=0:0:0.0175", "start=0,rise=270,trans=0.5:0:1.0,rot=0.012:0:0,shape=linear"]
+      - { name: epi-volume, overlay: { motion: { <<: *trace, within_volume_sampling: volume } } }
+      - { name: epi-spinhistory, overlay: { motion: { <<: *trace, spin_history: true } } }
+      - { name: mb4-still, protocol: { multiband: 4 } }
+      - { name: mb4, protocol: { multiband: 4 }, overlay: { motion: *trace } }
+      - { name: grase-1shot, protocol: { type: grase, n_shots: 1, te: 0.0224 }, overlay: { readout: { ky_segments: 1, line_spacing: 0.3 }, motion: *trace } }
+      - { name: grase, protocol: { type: grase, n_shots: 4, te: 0.010 }, overlay: { readout: { ky_segments: 4, line_spacing: 0.3 }, motion: *trace } }
+      - { name: spiral, protocol: { type: spiral, interleaves: 8, te: 0.012 }, overlay: { acquisition: { matrix: [68, 68] }, readout: { interleaves: 8, spiral_readout_time: 5.0, dwell_time: 4.0e-6 }, motion: *trace } }

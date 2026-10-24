@@ -47,6 +47,9 @@ project:
         - file: book/03-preprocessing/08-noise.md
         - file: book/03-preprocessing/09-background-suppression.md
         - file: book/03-preprocessing/10-motion.md
+          children:
+            - file: book/03-preprocessing/10a-motion-within-a-volume.md
+            - file: book/03-preprocessing/10b-registering-asl.md
         - file: book/03-preprocessing/11-susceptibility-distortion.md
         - file: book/03-preprocessing/12-partial-volume.md
         - file: book/03-preprocessing/13-assembled-pipeline.md

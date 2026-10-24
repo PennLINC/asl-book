@@ -74,6 +74,10 @@ KEY_GLOSSARY: dict[str, str] = {
     "motion.within_volume.severity": "the signal attenuation of an event shot's lines (Chapter 10)",
     "motion.within_volume.jump_mm": "the translation an event adds, kept by the later shots of the volume (Chapter 10)",
     "motion.within_volume.jump_deg": "the rotation an event adds (Chapter 10)",
+    "motion.trajectory": "a TSV of poses replayed by the simulator; with a time column it is a timed trace, sampled at every 2D shot's or 3D segment's own excitation time (Chapter 10.1)",
+    "motion.trace": "the pipeline's recipe for that timed trace (aslbook.traces, the same components as aslscan's tools/motion_trace.py): rate in Hz, duration in s, and nod, step and drift components; the pipeline writes the TSV next to the overlay (Chapter 10.1)",
+    "motion.within_volume_sampling": "shot (each 2D shot or 3D segment takes the trace's pose at its own time; the default for a timed trace) or volume (every shot of a volume takes the pose at the volume's first shot, the view a per-volume simulator has) (Chapter 10.1)",
+    "motion.spin_history": "2D: step each phantom voxel's longitudinal magnetization through every slice excitation at its shot's pose, so tissue carried into a slice not yet excited is excited twice and comes out dark, and tissue carried out of one is skipped and comes out bright (Chapter 10.1)",
     "hadamard.order": "the Sylvester Hadamard order: order - 1 sub-boli per encoding cycle, decoded by the simulator; the aslcontext lists the decoded volumes (Chapter 18)",
     "look_locker.readouts_per_cycle": "a check that the arrays group into cycles of this many readouts per labeling (Chapter 18)",
     "m0.flip_angle": "a Look-Locker series' separate M0 scan takes this excitation (the series' own flip when omitted) (Chapter 18)",
@@ -267,7 +271,15 @@ def write_inputs(run: RunSpec, data_root: Path) -> Path:
     for name, sidecar in zip(run.sidecar_files(), run.sidecars):
         (d / name).write_text(json.dumps(sidecar, indent=1) + "\n")
     (d / "aslcontext.tsv").write_text("volume_type\n" + "\n".join(run.ctx) + "\n")
-    (d / "overlay.toml").write_text(to_toml(run.overlay))
+    overlay = copy.deepcopy(run.overlay)
+    trace = overlay.get("motion", {}).pop("trace", None)
+    if trace is not None:
+        # the timed trace is written from its recipe, and the overlay points at the file
+        from . import traces
+
+        path = traces.write(trace, d / "motion.tsv")
+        overlay["motion"]["trajectory"] = path.resolve().as_posix()
+    (d / "overlay.toml").write_text(to_toml(overlay))
     return d
 
 
@@ -316,6 +328,12 @@ def expected_files(run: RunSpec) -> list[str]:
         files += [gt.format("deltamStatic"), "sub-01/perf/ground-truth/sub-01_desc-motion_gt.tsv"]
     if "within_volume" in motion:
         files.append("sub-01/perf/ground-truth/sub-01_desc-motionEvents_gt.tsv")
+    per_shot = ("trace" in motion and motion.get("within_volume_sampling", "shot") != "volume") \
+        or motion.get("within_volume_sampling") in ("shot", "slice")
+    if per_shot:
+        files.append("sub-01/perf/ground-truth/sub-01_desc-motionShots_gt.tsv")
+    if motion.get("spin_history"):
+        files.append(gt.format("spinHistory"))
     if "exchange_time" in run.overlay.get("kinetic", {}):
         files.append(gt.format("deltamIntravascular"))
     if "macrovascular" in run.overlay:

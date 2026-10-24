@@ -150,6 +150,12 @@ class Run:
         """The within-volume (shot) motion events of a segmented run, as a DataFrame."""
         return self._tsv("sub-01/perf/ground-truth/sub-01_desc-motionEvents_gt.tsv")
 
+    def motion_shots(self):
+        """Every shot's time and absolute pose of a per-shot motion run (a timed trace, slice
+        sampling, or single-band events), as a DataFrame: volume, shot, slices, time, and the
+        six parameters (mm, radians)."""
+        return self._tsv("sub-01/perf/ground-truth/sub-01_desc-motionShots_gt.tsv")
+
     def physio(self):
         """The physiological factors applied per volume and slice (or shot), as a DataFrame."""
         return self._tsv("sub-01/perf/ground-truth/sub-01_desc-physio_gt.tsv")

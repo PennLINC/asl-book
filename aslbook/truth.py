@@ -22,6 +22,8 @@ TRUTH_MAPS: dict[str, tuple[str, str, str]] = {
     "deltamStatic": ("M0 units", "the unmoved deltam of a motion run", "10"),
     "motion": ("mm, rad", "the applied per-volume pose (translations and rotations) and any within-volume events, as a TSV", "10"),
     "motionEvents": ("mm, rad", "the shot-level motion events of a segmented 3D (or multiband) run: the shot, its pose jump and attenuation, as a TSV", "10"),
+    "motionShots": ("s, mm, rad", "a per-shot motion run (a timed trace): the excitation time and absolute pose of every 2D shot or 3D segment of every volume, as a TSV", "10.1"),
+    "spinHistory": ("image units", "a 2D run with spin history: the correction added to the tissue images, the difference between the longitudinal magnetization the tissue of each slice really had at its excitation and what the closed form assumed", "10.1"),
     "deltamIntravascular": ("M0 units", "the part of deltam still in the capillary at the readout under a finite exchange time; the rest has the tissue's T2", "19"),
     "deltamArterial": ("M0 units", "the label passing through the voxel's arteries (the macrovascular compartment) at each volume's timing, before any crushing", "19"),
     "aBV": ("fraction", "the arterial blood volume fraction of each acquisition voxel, from the per-tissue values given", "19"),
