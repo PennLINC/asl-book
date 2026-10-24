@@ -56,6 +56,16 @@ jobs:
         shell: bash -l {0}
         run: myst build --html --execute --ci
 
+      # myst reports a cell that raised as a page that renders the traceback, not as a failed
+      # build (a missing data release looked like a green run for two weeks).
+      - name: Fail on notebook execution errors
+        shell: bash -l {0}
+        run: |
+          if grep -rl --include='*.json' -E '"output_type": *"error"' _build/site _build/execute; then
+            echo "::error::a notebook cell raised; see the files above"
+            exit 1
+          fi
+
       - name: Add click-to-enlarge images
         shell: bash -l {0}
         run: python tools/inject_static.py _build/html
