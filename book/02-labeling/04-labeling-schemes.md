@@ -7,7 +7,7 @@ kernelspec:
 
 :::{admonition} Simulated datasets in this chapter
 :class: note
-- **Built in this page:** labeling geometry and timing diagrams, and the kinetic model's bolus for each scheme on a pure gray matter voxel ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
+- **Built in this page:** labeling geometry and timing diagrams, sagittal snapshots and an animation of the label on its way to the brain (`aslbook.sketch`), and the kinetic model's bolus for each scheme on a pure gray matter voxel ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
 - **`label-types`**: the same slab and the same 2D readout under PCASL (efficiency 0.85), CASL (0.68) and PASL with a Q2TIPS cut-off at 0.7 s and an inversion time of 1.8 s (0.98) ([Appendix A](../appendices/a-aslscan-cookbook.md#ds-label-types)).
 
 Pipeline-tier datasets are simulated offline by aslscan ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
@@ -32,10 +32,10 @@ After this chapter you can:
 :tags: [hide-cell]
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse, Rectangle
+from matplotlib.patches import Rectangle
 
-from aslbook import data, kinetic, phantom, presets, protocols, quant
-from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, sequence_diagram, set_style, show_slice
+from aslbook import data, kinetic, phantom, presets, protocols, quant, sketch
+from aslbook.plotting import INK, PALETTE, TISSUE_COLORS, animate, sequence_diagram, set_style, show_slice
 
 set_style()
 GM = presets.TISSUES["GM"]
@@ -202,23 +202,14 @@ book represents their cost.
 
 ## See it: where the label is made
 
-The three sketches are sagittal views, not to scale, with the two feeding arteries drawn
-in red and the book's 10 cm imaging slab dashed in blue.
+The three sketches are sagittal views, not to scale, facing left, with the two feeding
+arteries (a carotid in front, a vertebral behind) drawn in red and the book's 10 cm imaging
+slab dashed in blue.
 
 ```{code-cell} python
 :tags: [hide-input]
 ORANGE, YELLOW, BLUE, RED = TISSUE_COLORS["GM"], PALETTE[3], PALETTE[0], PALETTE[7]
-
-def head(ax, title):
-    ax.add_patch(Rectangle((-3.2, -7), 6.4, 9, color="0.92", zorder=0))      # neck
-    ax.add_patch(Ellipse((0, 8), 13, 15, color="0.92", zorder=0))            # head
-    ax.add_patch(Ellipse((0, 8.5), 10, 11, color="0.84", zorder=1))          # brain
-    for x0 in (-1.3, 1.3):                                                   # carotid + vertebral arteries
-        ax.plot([x0, x0, 0.6 * x0, 2.5 * x0], [-7, 1.5, 5, 9], color=RED, lw=2, zorder=2, solid_capstyle="round")
-    ax.add_patch(Rectangle((-7, 5), 14, 8, fill=False, ec=BLUE, lw=1.5, ls="--", zorder=3))
-    ax.text(7.3, 9, "imaging\nslab", color=BLUE, fontsize=8, va="center")
-    ax.set(xlim=(-10, 12), ylim=(-8, 17), aspect="equal", title=title)
-    ax.set_axis_off()
+head = lambda ax, title: sketch.draw_head(ax, title, blood=RED)
 
 fig, axes = plt.subplots(1, 3, figsize=(11, 4.2))
 head(axes[0], "PASL: a slab inverted at once")
@@ -246,6 +237,108 @@ unknown drainage into a bolus of known duration. In continuous and pseudo-contin
 labeling (middle, right) the label is made at a single plane across the neck, and the bolus
 is however much blood crossed the plane while the RF was on. The two differ in how the RF
 is delivered, not in where.
+
+## See it: the label on its way to the brain
+
+Where the label is made decides how it travels. The sketches below follow the blood in
+the two arteries of the same sagittal head through one repetition of PCASL (top) and of
+the book's pulsed scheme (bottom), FAIR with a Q2TIPS cut-off, at the same four times on
+the same clock. The blood moves in plug flow at a speed set so that blood leaving the PCASL
+plane reaches the tissue at the end of each artery after the gray matter transit time,
+0.8 s. Fresh blood is pale red; labeled blood is purple, fading back to red as its
+inversion decays with $T_{1b}$; blood whose label the cut-off destroyed is gray. The disk at
+the end of each artery is the gray matter it feeds, colored by the label it holds
+according to the kinetic model, on one scale for both schemes. The imaging slab is filled
+during the readout.
+
+```{code-cell} python
+:tags: [hide-input]
+arteries = {name: sketch.Artery(pts) for name, pts in sketch.ARTERY_PATHS.items()}
+for name, a in arteries.items():
+    print(f"{name:9}: transit time from the PCASL plane {a.att('PCASL'):.2f} s, from the top of the pulsed inversion "
+          f"{a.att('PASL'):.2f} s; the inverted column would take {(a.s_top + sketch.COIL_BELOW) / a.speed:.2f} s to drain")
+TIMES = (0.4, 1.0, 1.8, 3.6)
+fig, axes = plt.subplots(2, 4, figsize=(11, 6.6))
+for row, scheme in zip(axes, ("PCASL", "PASL")):
+    for ax, t in zip(row, TIMES):
+        sk = sketch.LabelingSketch(ax, scheme)
+        sk.update(t)
+        ax.set_title(f"{scheme}, t = {t} s", fontsize=9)
+        sk.clock.set_text(sketch.phase(t, scheme))
+fig.legend(handles=sketch.legend_handles(), loc="lower center", ncol=4)
+fig.tight_layout(rect=(0, 0.05, 1, 1))
+```
+
+Read the top row from left to right. At 0.4 s the RF is on and the blood that has crossed
+the plane is labeled, from the plane up to the front of the bolus, halfway to the brain;
+the blood below the plane is still fresh. At 1.0 s the front has reached the tissue, which
+it did at 0.80 s, and gray matter has begun to collect label, while the plane goes on
+labeling the blood behind it. At 1.8 s the RF stops: the bolus is now a column of labeled
+blood whose tail is just leaving the plane, with fresh blood behind it, and it is the
+oldest label, at the front, that has faded most. By the readout at 3.6 s the arteries hold
+only fresh blood again; all the label has been delivered, and what the image sees is the
+part of it that has survived in the tissue.
+
+The bottom row is different from the first frame. The inversion pulse labels the whole
+column of blood below the imaging region at once, out to the edge of the transmit coil, so
+at 0.4 s the label already fills both arteries and its front, which started at the top of
+the inverted region, has reached the tissue (0.36 s here, against 0.80 s from the PCASL
+plane). Left alone, the column would take 1.12 s to drain into the brain, a duration set by
+the coil and the anatomy rather than by the operator. The Q2TIPS train from 0.7 s destroys
+the label of everything that crosses its band, so at 1.0 s the blood above the band is gray
+and the labeled blood still below it never contributes: the bolus that reached the tissue
+lasted about 0.7 s, the cut-off time. At the readout, 1.8 s after the pulse, the arteries hold
+fresh and saturated blood, and the tissue holds a shorter, younger bolus than PCASL's.
+
+The same two schemes in motion, on one clock from the start of labeling to the end of the
+PCASL readout, with the gray matter label of the carotid territory plotted underneath and
+each scheme's readout shaded:
+
+```{code-cell} python
+:tags: [hide-input]
+fig = plt.figure(figsize=(10, 6.6))
+gs = fig.add_gridspec(2, 2, height_ratios=[3.2, 1])
+sketches = [sketch.LabelingSketch(fig.add_subplot(gs[0, i]), scheme) for i, scheme in enumerate(("PCASL", "PASL"))]
+axc = fig.add_subplot(gs[1, :])
+tt = np.linspace(0, 4.4, 441)
+for sk, ls in zip(sketches, ("-", "--")):
+    att = arteries["carotid"].att(sk.scheme)
+    axc.plot(tt, 100 * sketch.tissue_label(tt, att, sk.scheme), color=ORANGE, ls=ls, label=f"{sk.scheme}: ATT {att:.2f} s")
+    ro = sketch.readout_start(sk.scheme)
+    axc.axvspan(ro, ro + R.readout_duration, color=BLUE, alpha=0.12, lw=0)
+    axc.text(ro + R.readout_duration / 2, 1.2, f"{sk.scheme} readout", ha="center", fontsize=7, color=INK["secondary"])
+    print(f"{sk.scheme:5}: gray matter label at the start of its readout ({ro} s) {100 * sketch.tissue_label(ro, att, sk.scheme):.2f} % of M0")
+cursor = axc.axvline(0, color=INK["secondary"], lw=1)
+axc.set(xlim=(0, 4.4), ylim=(0, 1.35), xlabel="time from the start of labeling (s)", ylabel="GM ΔM (% of M0)")
+axc.legend(loc="upper right", bbox_to_anchor=(1, 0.85))
+fig.tight_layout()
+
+def frame(t):
+    for sk in sketches:
+        sk.update(t)
+    cursor.set_xdata([t, t])
+
+animate(fig, frame, np.round(np.arange(0, 4.4001, 0.05), 2), fps=10, width=760, dpi=70,
+        alt="two sagittal sketches of a head, PCASL on the left and PASL on the right, on one clock: in PCASL a purple "
+            "labeled bolus leaves a plane in the neck for 1.8 s and climbs the two arteries to the brain, where two disks "
+            "of gray matter turn orange; in PASL the whole column of blood below the brain turns purple at once, its top "
+            "reaches the brain within half a second, and from 0.7 s the blood crossing a band below the brain turns gray. "
+            "Underneath, the gray matter label of each scheme rises and decays, and each readout is shaded")
+```
+
+The animation shows the two clocks side by side. The PCASL bolus is made over 1.8 s and
+travels as a moving column; the pulsed bolus exists in full from the first instant and is
+trimmed from behind. Underneath, the gray matter label of PCASL rises from 0.8 s while its
+bolus arrives and peaks when the last of it has arrived, at 2.6 s; the pulsed label rises
+sooner and stops rising when the cut-off's last blood arrives. At the start of its readout
+the PCASL tissue holds 0.53 % of $M_0$ and the pulsed tissue 0.43 %.
+
+One difference in the sketch is geometric: the pulsed label starts only centimeters below
+the brain, the PCASL label in the neck, so the pulsed label arrives sooner. Real transit
+times also depend on where the label is made. The simulated brain, like the
+standard kinetic model, gives each tissue one transit time whatever the scheme, 0.8 s in
+gray matter, and the rest of this chapter uses that value for all three schemes, which is
+why the pulsed curve below differs from the one in the animation.
 
 ## See it: the timing of each scheme
 

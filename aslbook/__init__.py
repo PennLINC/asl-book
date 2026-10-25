@@ -15,6 +15,7 @@ cookbook  : render the aslscan inputs and commands behind every dataset (Appendi
 traces    : timed head-motion traces (nods, steps, drifts) written from the recipes in datasets.yaml
 motion    : rigid poses, resampling, a small registration with four costs, and the pipelines' motion summaries
 plotting  : house style for slice mosaics, error maps, fit-vs-truth panels
+sketch    : sagittal sketches of where the label is made and how labeled blood reaches the brain
 """
 
 __version__ = "0.1.0.dev0"

@@ -112,7 +112,9 @@ and QUIPSS II / Q2TIPS cut-offs. Continuous labeling: flow-driven adiabatic inve
 plane, the amplitude-modulated control, efficiency ~0.68 and the magnetization-transfer
 problem. Pseudo-continuous labeling: the pulse train, efficiency 0.85, its sensitivity to
 off-resonance and velocity (mention). Control conditions; what "label efficiency" means and
-how the sidecar records it. *Toy:* labeling geometry diagrams; a sequence diagram per scheme;
+how the sidecar records it. *Toy:* labeling geometry diagrams; sagittal snapshots and an
+animation of the label traveling from the PCASL plane and the PASL inversion region to the
+brain, with the Q2TIPS cut-off (`aslbook.sketch`); a sequence diagram per scheme;
 the bolus as a function of time for each scheme (`kinetic.delta_m` with the three branches).
 *Pipeline:* `label-types` (the same slab under PCASL, CASL, PASL: ΔM images and their
 amplitude ratios vs the efficiency and bolus duration).
