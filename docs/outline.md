@@ -54,6 +54,14 @@ acquisition stage.
 
 ## Part 0 — Front matter
 
+### What ASL measures, and why it matters (unnumbered, before 0.1)
+Why the brain's blood supply is worth measuring; the derivatives in plain terms (CBF, ATT,
+aBAT, aBV; CVR and exchange in passing) and what each does to a voxel's signal; their
+research and clinical uses; task-based (perfusion) fMRI and why ASL suits slow designs.
+*Toy:* the kinetic model with a plug-flow arterial term, one quantity varied at a time; a
+24-minute block design with scanner drift, as images and as control − label. *Pipeline:*
+none.
+
 ### 0.1 How to read and run this book
 Audience, the executable cells, the two tiers, running locally, reproduction, conventions.
 

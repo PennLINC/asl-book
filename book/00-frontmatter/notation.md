@@ -58,6 +58,8 @@ The kinetic model is the general kinetic model of {cite:t}`buxton1998`.
 | $\alpha$ | labeling efficiency (PCASL 0.85 and PASL 0.98 {cite:p}`alsop2015`; CASL 0.68 here {cite:p}`wang2005,wu2007`) | – | 4 |
 | $\tau$ | bolus duration: the labeling duration for (P)CASL, the cut-off delay for PASL | s | 4, 5 |
 | $\delta$, ATT | arterial transit time (GM 0.8 s, WM 1.2 s in the phantom) | s | 3, 5 |
+| $\delta_\mathrm{a}$, aBAT | arterial bolus arrival time: when the label reaches the arteries inside a voxel, before the tissue (the `aATT` truth map) | s | 19 |
+| aBV | arterial blood volume: the fraction of a voxel filled by arterial blood in transit | – | 19 |
 | $w$, PLD | post-labeling delay | s | 5 |
 | $t$ | signal time from the start of labeling: PLD + $\tau$ for (P)CASL, TI for PASL, plus the slice's offset in a 2D readout | s | 5, 6 |
 | $\Delta M(t)$ | label-control difference in longitudinal magnetization at time $t$ | M0 units | 5 |

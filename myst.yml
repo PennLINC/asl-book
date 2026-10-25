@@ -26,6 +26,7 @@ project:
     - README.md
   toc:
     - file: book/index.md
+    - file: book/00-frontmatter/what-asl-measures.md
     - title: Front matter
       children:
         - file: book/00-frontmatter/how-to-read.md

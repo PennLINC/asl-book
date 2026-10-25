@@ -29,6 +29,7 @@ from the data release. The datasets are simulated by the repository's offline pi
 
 | Part | Chapters | What you will be able to do |
 |---|---|---|
+| [What ASL measures](00-frontmatter/what-asl-measures.md) | – | say what CBF, transit time and arterial blood volume are, what each is used for, and why ASL suits slow tasks |
 | Front matter | 0.1–0.3 | run the book, know the simulated datasets, read the notation |
 | I. MRI physics for perfusion imaging | 1–2 | follow the longitudinal magnetization through saturation and inversion, and know what an EPI, a 3D GRASE or a spiral readout does to an image |
 | II. Perfusion and its labeling | 3–7 | define perfusion, label arterial water three ways, predict the difference signal with the kinetic model, read an ASL series, and choose the delay, duration, TR, voxel, and number of pairs |
