@@ -81,8 +81,9 @@ does not require reading the code, but the code is short and deliberately litera
 is the exact procedure behind each figure. Cells that only set up imports are hidden
 entirely.
 
-Each chapter opens with a box listing the simulated datasets it uses, with links to their
-descriptions in [Appendix A](../appendices/a-aslscan-cookbook.md#app-a-datasets). It then
+Each chapter that uses the simulated datasets opens with a box listing them, with links to
+their descriptions in [Appendix A](../appendices/a-aslscan-cookbook.md#app-a-datasets);
+Chapters 1 and 3, which use only simulations built in the page, have none. Every chapter
 follows one structure: *learning goals*, the physics, a *See it* section that produces the
 figures, a *Measure it* section that reports a number against the known answer, *What this
 implies for acquisition*, and further reading. In Part III the middle sections follow the

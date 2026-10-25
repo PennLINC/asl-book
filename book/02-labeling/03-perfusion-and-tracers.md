@@ -5,13 +5,6 @@ kernelspec:
   display_name: Python 3
 ---
 
-:::{admonition} Simulated datasets in this chapter
-:class: note
-- **Built in this page:** a one-compartment tracer model integrated step by step, the label's T1 decay, and the packaged phantom slab's tissue fractions, perfusion and transit-time maps ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
-
-This chapter uses no pipeline-tier dataset. The phantom it draws is the one every aslscan run in the book is made from ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
-:::
-
 ## Learning goals
 
 After this chapter you can:
@@ -170,6 +163,9 @@ less label for the same $f$, and imaging before the label has arrived measures n
 
 ## See it: the phantom's perfusion and transit-time maps
 
+The maps come from the packaged phantom slab
+([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)), the same slab every
+aslscan run in the book is made from ([Chapter 0.2](../00-frontmatter/the-simulated-datasets.md)).
 The simulated brain is piecewise constant: each voxel of the acquisition grid holds a
 fraction of gray matter, white matter and CSF, and every property of the voxel is the
 fraction-weighted mean of the tissue constants. The fractions on the display slice:

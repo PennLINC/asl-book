@@ -5,13 +5,6 @@ kernelspec:
   display_name: Python 3
 ---
 
-:::{admonition} Simulated datasets in this chapter
-:class: note
-- **Built in this page:** Bloch-equation curves and animations, an isochromat spin-echo simulation, and the longitudinal signal equations evaluated with the tissue and blood constants of the simulated brain ([Appendix B](../appendices/b-data-manifest.md#app-b-package-data)).
-
-No pipeline-tier dataset is used here; the first images appear in [Chapter 2](../01-mri-physics/02-epi-and-reconstruction.md).
-:::
-
 ## Learning goals
 
 After this chapter you can:

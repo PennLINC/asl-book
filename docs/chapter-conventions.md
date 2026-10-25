@@ -19,7 +19,9 @@ kernelspec:
 
 ## Structure
 
-1. **Datasets box** right after the front matter:
+1. **Datasets box** right after the front matter, in every chapter that loads a
+   pipeline-tier dataset (a chapter that uses only the toy tier has none, and says where its
+   curves and maps come from in the prose):
 
    ```
    :::{admonition} Simulated datasets in this chapter
