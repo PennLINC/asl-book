@@ -12,7 +12,7 @@ project:
   authors:
     - name: Taylor Salo
       email: tsalo90@gmail.com
-  github: https://github.com/PennLINC/asl-book
+  github: https://github.com/PennLINC/perfusion-book
   license:
     content: CC-BY-4.0
     code: MIT

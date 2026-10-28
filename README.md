@@ -1,4 +1,4 @@
-# asl-book
+# perfusion-book
 
 Arterial spin labeling executable book, built with Jupyter Book 2 (mystmd). Figures come from
 small in-notebook simulations (the kinetic model and signal equations evaluated on a packaged

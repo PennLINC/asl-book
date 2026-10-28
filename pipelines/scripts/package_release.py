@@ -73,7 +73,7 @@ def main():
     reg = Path(data.__file__).with_name("registry.txt")
     reg.write_text("\n".join(lines) + "\n")
     print(f"{len(lines) - 2} assets, {total / 1e6:.0f} MB, registry at {reg}; assets in {out}")
-    print(f"gh release create {data.DATA_TAG} --repo PennLINC/asl-book --title 'Simulated datasets {data.DATA_TAG}' {out.as_posix()}/*")
+    print(f"gh release create {data.DATA_TAG} --repo PennLINC/perfusion-book --title 'Simulated datasets {data.DATA_TAG}' {out.as_posix()}/*")
 
 
 if __name__ == "__main__":

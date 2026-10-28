@@ -29,7 +29,7 @@ import numpy as np
 
 #: Tag of the GitHub release that holds the datasets. Bumped by the release script.
 DATA_TAG = "data-v0.1"
-_REPO = "PennLINC/asl-book"
+_REPO = "PennLINC/perfusion-book"
 _REGISTRY_FILE = Path(__file__).with_name("registry.txt")
 
 

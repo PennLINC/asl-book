@@ -117,8 +117,8 @@ The repository holds the pages, the helper package `aslbook`, and the pipeline. 
 any chapter locally:
 
 ```bash
-git clone https://github.com/PennLINC/asl-book
-cd asl-book
+git clone https://github.com/PennLINC/perfusion-book
+cd perfusion-book
 micromamba create -n aslbook -f environment.yml
 micromamba run -n aslbook pip install -e .
 OMP_NUM_THREADS=1 micromamba run -n aslbook myst start --execute
